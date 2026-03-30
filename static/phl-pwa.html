@@ -665,40 +665,44 @@ async function loadSchedule() {
   let data = null;
   const today = isoToday();
 
-  // ── Step 1: Sessions table (most authoritative — always has latest data)
-  // This runs FIRST because daily_schedules save can fail due to 502 timeout.
-  // Sessions are written before the HTTP response so they always exist.
+  // Step 1: Sessions table — always has latest data even when daily_schedules save fails
+  // /api/sessions returns summary list; /api/session/<id> returns full result blob
   try {
     const sessRes = await api('/api/sessions');
     const sessions = sessRes.sessions || [];
 
-    // Always capture the most recent session_id for Live Ops actions
+    // Always grab the most recent session_id for Live Ops (delay/gate/reassign)
     if (sessions.length) {
       S.sessionId = sessions[0].session_id || sessions[0].id;
     }
 
-    // Find most recent session that has result data with assignments
-    for (const sess of sessions.slice(0, 10)) {
-      const sid  = sess.session_id || sess.id;
-      const raw  = sess.schedule_date;
+    // Walk sessions newest-first, fetch full result for the first one with 20+ flights
+    for (const sess of sessions.slice(0, 5)) {
+      const sid   = sess.session_id || sess.id;
+      const raw   = sess.schedule_date;
       const sDate = raw ? String(raw).slice(0, 10) : null;
-      const total = sess.total_flights || sess.stats?.total || 0;
+      const total = sess.total_flights
+        || (sess.stats && sess.stats.total)
+        || 0;
 
       if (!sid) continue;
-      // Skip sessions with very few flights (old partial solves)
-      if (total > 0 && total < 20) continue;
+      if (total > 0 && total < 20) continue; // skip tiny/partial sessions
 
-      // Sessions table stores result as JSON — check for assignments array
-      const res = sess.result || {};
-      const asgn = res.assignments || res.flights || [];
-      if (asgn.length > 0) {
-        data = res;
-        S.sessionId = sid;
-        if (sDate) S.schedDate = sDate;
-        break;
-      }
+      // Fetch full result via /api/session/<id>  (returns {result:{assignments:[...]}})
+      try {
+        const full = await api(`/api/session/${sid}`);
+        if (full && full.result) {
+          const asgn = full.result.assignments || full.result.flights || [];
+          if (asgn.length > 0) {
+            data = full.result;
+            S.sessionId = sid;
+            if (sDate) S.schedDate = sDate;
+            break;
+          }
+        }
+      } catch(e2) { /* this session unavailable, try next */ }
     }
-  } catch(e) { /* sessions unavailable — try daily_schedules */ }
+  } catch(e) { /* sessions unavailable, fall through to daily_schedules */ }
 
   // ── Step 2: daily_schedules table (when sessions don't have inline result data)
   if (!data) {
