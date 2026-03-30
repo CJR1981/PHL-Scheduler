@@ -5784,12 +5784,17 @@ function applyRoleUI(role) {
 }
 
 // ── Check saved session on load ────────────────────────────────────────────
-// Fetch server config once on load — determines if schedule generation is enabled
+// Fetch server config once — stored as a Promise so bootForRole waits for it
 window._serverConfig = { schedule_generation: true }; // safe default
-fetch('/api/config')
+window._serverConfigReady = fetch('/api/config')
   .then(function(r){ return r.json(); })
-  .then(function(cfg){ window._serverConfig = cfg; })
-  .catch(function(){});  // silently fail — default allows generation
+  .then(function(cfg){
+    window._serverConfig = cfg;
+    return cfg;
+  })
+  .catch(function(){
+    return window._serverConfig; // fallback to default
+  });
 
 function checkAuthOnLoad() {
   var token = localStorage.getItem(AUTH_KEY);
@@ -5909,10 +5914,29 @@ function loadSavedSchedule(date, shift) {
   .then(function(data){
     if (data.error) { console.warn('loadSavedSchedule:', data.error); return; }
     if (!data.found) {
-      // No schedule yet
+      // No schedule saved for this date
       var role = currentUser ? currentUser.role : 'agent';
-      if (role === 'manager' || role === 'admin' || role === 'supervisor') {
-        // Manager sees generate panel
+      var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
+
+      if (opsOnly) {
+        // Ops-only mode: show a clean "no schedule" message — NOT the CSV upload screen
+        var mainContent = document.getElementById('results') || document.querySelector('.main-content') || document.querySelector('main');
+        if (mainContent) {
+          mainContent.innerHTML = [
+            '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;',
+            'height:60vh;gap:16px;color:#8899bb;text-align:center;padding:32px">',
+            '<div style="font-size:48px">📋</div>',
+            '<div style="font-family:monospace;font-size:14px;font-weight:600;color:#e8a020;letter-spacing:.06em">NO SCHEDULE FOR ' + date + '</div>',
+            '<div style="font-size:13px;line-height:1.6;max-width:360px">',
+            'No schedule has been saved for this date yet.<br>',
+            'Generate one on your local Mac — it will appear here automatically.',
+            '</div>',
+            '<div style="font-size:12px;color:#4a5c7a;margin-top:8px">Use the date picker above to load a previous schedule.</div>',
+            '</div>'
+          ].join('');
+        }
+      } else if (role === 'manager' || role === 'admin' || role === 'supervisor') {
+        // Mac/local: show generate panel
         document.getElementById('empty-state') &&
           (document.getElementById('empty-state').style.display = '');
       } else {
@@ -5962,21 +5986,47 @@ function bootForRole(user) {
   }
 
   if (role === 'manager' && !canGenerate) {
-    // Manager on Render: ops-only mode — load schedule but hide generate sidebar
+    // ── Ops-only mode (Render) ──────────────────────────────────────────────
+    // Hide the generate sidebar entirely
     var sidebar = document.getElementById('sidebar');
     if (sidebar) sidebar.style.display = 'none';
-    // Show a banner so it's clear this is ops-only mode
-    var banner = document.createElement('div');
-    banner.id = 'ops-only-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#1a2235;border-bottom:2px solid #e8a020;padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px;color:#8899bb;';
-    banner.innerHTML = '<span style="color:#e8a020;font-weight:700;font-family:monospace;letter-spacing:.06em">OPS MODE</span> Schedule generation is disabled on this server. Use your local Mac to generate schedules. <span id="ops-banner-date" style="margin-left:auto;font-family:monospace;font-size:11px;color:#4a5c7a"></span>';
-    document.body.prepend(banner);
-    // Push main content down to clear banner
-    var mainEl = document.querySelector('main') || document.getElementById('main');
-    if (mainEl) mainEl.style.paddingTop = (parseInt(mainEl.style.paddingTop||0) + 40) + 'px';
-    var shift = window._currentShift || 'combined';
-    loadSavedSchedule(today, shift);
+
+    // Hide the empty state "Upload CSV to begin" screen
+    var emptyState = document.getElementById('empty-state');
+    if (emptyState) emptyState.style.display = 'none';
+
+    // Show OPS MODE banner in header area
+    if (!document.getElementById('ops-only-banner')) {
+      var banner = document.createElement('div');
+      banner.id = 'ops-only-banner';
+      banner.style.cssText = [
+        'background:#0a0f1a',
+        'border-bottom:2px solid #e8a020',
+        'padding:6px 16px',
+        'display:flex',
+        'align-items:center',
+        'gap:12px',
+        'font-size:12px',
+        'color:#8899bb',
+        'flex-shrink:0'
+      ].join(';');
+      banner.innerHTML = [
+        '<span style="color:#e8a020;font-weight:700;font-family:monospace;letter-spacing:.06em;font-size:11px">⚡ OPS MODE</span>',
+        '<span>Render server — schedule generation disabled. Use local Mac to generate.</span>',
+        '<span id="ops-date-label" style="margin-left:auto;font-family:monospace;font-size:11px;color:#4a5c7a"></span>'
+      ].join('');
+      // Insert banner at top of body (before main app wrapper)
+      var appWrap = document.getElementById('app') || document.querySelector('.app-wrapper') || document.body.firstElementChild;
+      if (appWrap && appWrap.parentNode) {
+        appWrap.parentNode.insertBefore(banner, appWrap);
+      } else {
+        document.body.prepend(banner);
+      }
+    }
+
+    // Load schedule dates for date picker, then load most recent
     loadScheduleDates();
+    loadSavedSchedule(today, 'combined');
     return;
   }
 
@@ -7202,20 +7252,23 @@ function showToast(msg, duration) {
   setTimeout(function(){ t.style.opacity = '0'; }, duration || 3000);
 }
 
-// Hook bootForRole into applySession
+// Hook bootForRole into applySession — wait for config before deciding UI mode
 var _origApplySession = applySession;
 applySession = function(user) {
   _origApplySession(user);
-  bootForRole(user);
-  // Hide "+ New Schedule" button in ops-only mode
-  var canGenerate = !window._serverConfig || window._serverConfig.schedule_generation !== false;
-  if (!canGenerate) {
-    var btnNew = document.querySelector('.btn-new');
-    if (btnNew) btnNew.style.display = 'none';
-    // Also hide the collapsed sidebar bar entirely
-    var newBar = document.querySelector('.new-schedule-bar');
-    if (newBar) newBar.style.display = 'none';
-  }
+  // Wait for /api/config to resolve before booting the role UI
+  var configPromise = window._serverConfigReady || Promise.resolve(window._serverConfig);
+  configPromise.then(function() {
+    bootForRole(user);
+    // Hide "+ New Schedule" button in ops-only mode
+    var canGenerate = window._serverConfig && window._serverConfig.schedule_generation !== false;
+    if (!canGenerate) {
+      var btnNew = document.querySelector('.btn-new');
+      if (btnNew) btnNew.style.display = 'none';
+      var newBar = document.querySelector('.new-schedule-bar');
+      if (newBar) newBar.style.display = 'none';
+    }
+  });
 };
 </script>
 
