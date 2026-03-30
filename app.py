@@ -42,6 +42,16 @@ def index():
     resp.headers['Expires']       = '0'
     return resp
 
+@app.route('/api/config')
+def app_config():
+    """Frontend config — tells the UI which features are enabled on this server."""
+    return jsonify({
+        'schedule_generation': os.environ.get('DISABLE_SCHEDULE_GENERATION', '').lower() != 'true',
+        'server': 'render' if os.environ.get('DISABLE_SCHEDULE_GENERATION') else 'local',
+        'version': '2.6',
+    })
+
+
 @app.route('/pwa')
 def pwa():
     from flask import make_response
@@ -54,6 +64,13 @@ def pwa():
 
 @app.route('/api/schedule', methods=['POST'])
 def schedule():
+    # Schedule generation is disabled on Render — run locally on your Mac.
+    # Set DISABLE_SCHEDULE_GENERATION=true in Render env vars to enforce this.
+    if os.environ.get('DISABLE_SCHEDULE_GENERATION', '').lower() == 'true':
+        return jsonify({
+            'error': 'Schedule generation is disabled on this server. '
+                     'Generate schedules locally and they will sync here automatically.'
+        }), 403
     try:
         dep_file  = request.files.get('departures')
         arr_file  = request.files.get('arrivals')
