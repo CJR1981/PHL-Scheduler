@@ -3584,27 +3584,93 @@ function printTeamCards() {
     const ops = (t.operations||[]).slice().sort((a,b)=>(a.dispatch_min||0)-(b.dispatch_min||0));
     const fc  = t.flight_count || t.ops || 0;
     let rows  = '';
+
+    // Assign run numbers by grouping on dispatch_min (same dispatch = same truck run)
+    let runNum = 0;
+    let lastDispatch = null;
     ops.forEach((op, idx) => {
+      const dispKey = op.dispatch_min != null ? op.dispatch_min : op.dispatch || '';
+      if (dispKey !== lastDispatch) { runNum++; lastDispatch = dispKey; }
+      const sameRun = idx > 0 && (ops[idx-1].dispatch_min != null ? ops[idx-1].dispatch_min : ops[idx-1].dispatch || '') === dispKey;
+      const isFirstInRun = !sameRun;
+
+      // Buffer (only between runs, not within a run)
       const prev   = idx > 0 ? ops[idx-1] : null;
-      const bufMin = prev ? ((op.dispatch_min||0)-(prev.team_free_min||prev.svc_end_min||0)) : null;
-      const bufStr = bufMin === null ? '—' : `${bufMin} min`;
-      const rowBg  = (op.is_intl && !op.is_precleared) ? '#f3f0ff' : op.is_short_turn ? '#fff0f0' : op.is_ron ? '#f0fff4' : (idx%2===0?'#fff':'#f9fafb');
-      const type   = (op.is_intl && !op.is_precleared) ? 'INTL' : op.is_precleared ? 'PRECLRD' : op.is_short_turn ? 'SHORT TURN' : op.is_ron ? 'RON' : 'DOM';
-      rows += `<tr style="background:${rowBg}">
-        <td>${idx+1}</td>
-        <td><strong>${op.flight}</strong>${op.run_size>1?` ×${op.run_size}`:''}</td>
+      const bufMin = (!prev || sameRun)
+        ? null
+        : ((op.dispatch_min||0) - (prev.team_free_min||prev.svc_end_min||0));
+      const bufStr = bufMin === null ? '' : `${bufMin} min`;
+      const bufColor = bufMin === null ? '' : bufMin < 10 ? '#dc2626' : bufMin < 20 ? '#d97706' : '#16a34a';
+
+      // Row styling by type
+      const rowBg = (op.is_intl && !op.is_precleared) ? '#f3f0ff'
+        : (op.is_short_turn || op.inbound_flight) ? '#fff7ed'
+        : op.is_ron ? '#f0fff4'
+        : sameRun ? '#f8faff'
+        : (idx%2===0 ? '#fff' : '#f9fafb');
+
+      // Type badge
+      const typeColor = (op.is_intl&&!op.is_precleared) ? {bg:'#ede9fe',tx:'#7c3aed'}
+        : op.is_precleared ? {bg:'#ecfdf5',tx:'#059669'}
+        : (op.is_short_turn || op.inbound_flight) ? {bg:'#fee2e2',tx:'#dc2626'}
+        : op.is_ron ? {bg:'#f0fdf4',tx:'#15803d'}
+        : {bg:'#eff6ff',tx:'#1d4ed8'};
+      const typeLabel = (op.is_intl&&!op.is_precleared) ? 'INTL'
+        : op.is_precleared ? 'PRECLRD'
+        : (op.is_short_turn || op.inbound_flight) ? 'TURN'
+        : op.is_ron ? 'RON' : 'DOM';
+
+      // Run cell — show number only on first flight of run, span indicator for subsequent
+      const runCell = isFirstInRun
+        ? `<td rowspan="1" style="font-weight:700;color:#1d4ed8;text-align:center;font-size:13px">R${runNum}</td>`
+        : `<td style="text-align:center;color:#94a3b8;font-size:11px">↓</td>`;
+
+      // STD cell
+      const stdCell = op.delayed
+        ? `<span style="color:#92400e;font-weight:700">${op.std}</span>`
+        : `<strong>${op.std||'—'}</strong>`;
+
+      // Buffer separator row — shown BEFORE each new run (except the first)
+      const bufRow = (isFirstInRun && bufMin !== null) ? `
+        <tr style="background:#f1f5f9">
+          <td colspan="10" style="padding:3px 8px;font-size:11px;color:${bufColor};font-weight:600;text-align:right">
+            ← ${bufStr} buffer
+          </td>
+        </tr>` : '';
+
+      // Main flight row
+      rows += bufRow + `<tr style="background:${rowBg}">
+        ${runCell}
+        <td><strong>AA ${op.flight}</strong></td>
         <td>${op.dest||'—'}</td>
-        <td><span style="font-size:10px;font-weight:700;padding:2px 5px;border-radius:3px;
-          background:${(op.is_intl&&!op.is_precleared)?'#ede9fe':op.is_precleared?'#ecfdf5':op.is_short_turn?'#fee2e2':'#f0fdf4'};
-          color:${(op.is_intl&&!op.is_precleared)?'#7c3aed':op.is_precleared?'#059669':op.is_short_turn?'#dc2626':'#16a34a'}">${type}</span></td>
+        <td><span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;
+          background:${typeColor.bg};color:${typeColor.tx}">${typeLabel}</span></td>
         <td>${op.gate||'—'}</td>
-        <td>${op.equip||'—'}</td>
-        <td><strong>${op.std||'—'}</strong></td>
-        <td>${op.dispatch||'—'}</td>
-        <td>${op.svc_start||'—'} → ${op.svc_end||'—'}</td>
-        <td style="font-weight:${bufMin!==null&&bufMin<10?'700':'400'};
-                   color:${bufMin!==null&&bufMin<10?'#dc2626':bufMin!==null&&bufMin<20?'#d97706':'#16a34a'}">${bufStr}</td>
+        <td style="font-size:11px">${op.equip||'—'}</td>
+        <td>${stdCell}</td>
+        <td style="color:#475569">${op.dispatch||'—'}</td>
+        <td style="color:#475569">${op.svc_start||'—'} → ${op.svc_end||'—'}</td>
+        <td style="color:${bufColor||'#94a3b8'};font-size:11px">${bufStr}</td>
       </tr>`;
+
+      // Inbound sub-row for TURN flights
+      if (op.inbound_flight) {  // show for ALL turns (any flight with an inbound)
+        const inbFlight  = op.inbound_flight  ? `AA ${op.inbound_flight}` : '—';
+        const inbOrigin  = op.inbound_origin  ? ` from ${op.inbound_origin}` : '';
+        const inbSta     = op.inbound_sta     || op.arrival_time_str || '—';
+        const groundMins = op.ground_mins     || op.ground_time      || '—';
+        const groundColor = (typeof groundMins === 'number' && groundMins < 45) ? '#dc2626'
+          : (typeof groundMins === 'number' && groundMins < 60) ? '#d97706' : '#475569';
+        rows += `<tr style="background:#fff7ed;border-top:none">
+          <td style="border-top:none"></td>
+          <td colspan="9" style="padding:4px 8px 6px 8px;border-top:none">
+            <span style="font-size:10px;font-weight:700;color:#92400e;letter-spacing:.04em;margin-right:8px">↩ INBOUND</span>
+            <span style="font-size:11px;color:#1e293b;font-weight:600">${inbFlight}${inbOrigin}</span>
+            <span style="font-size:11px;color:#64748b;margin-left:10px">STA <strong>${inbSta}</strong></span>
+            <span style="font-size:11px;color:${groundColor};margin-left:10px;font-weight:600">${groundMins}${typeof groundMins==='number'?'m':''} ground</span>
+          </td>
+        </tr>`;
+      }
     });
 
     body += `
@@ -3622,7 +3688,7 @@ function printTeamCards() {
       </div>
       <table>
         <thead><tr>
-          <th>#</th><th>Flight</th><th>Dest</th><th>Type</th><th>Gate</th>
+          <th>RUN</th><th>Flight</th><th>Dest</th><th>Type</th><th>Gate</th>
           <th>Equip</th><th>STD</th><th>Dispatch</th><th>Service Window</th><th>Buffer</th>
         </tr></thead>
         <tbody>${rows}</tbody>
