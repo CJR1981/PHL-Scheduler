@@ -5914,29 +5914,56 @@ function loadSavedSchedule(date, shift) {
   .then(function(data){
     if (data.error) { console.warn('loadSavedSchedule:', data.error); return; }
     if (!data.found) {
-      // No schedule saved for this date
       var role = currentUser ? currentUser.role : 'agent';
       var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
 
       if (opsOnly) {
-        // Ops-only mode: show a clean "no schedule" message — NOT the CSV upload screen
-        var mainContent = document.getElementById('results') || document.querySelector('.main-content') || document.querySelector('main');
-        if (mainContent) {
-          mainContent.innerHTML = [
-            '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;',
-            'height:60vh;gap:16px;color:#8899bb;text-align:center;padding:32px">',
-            '<div style="font-size:48px">📋</div>',
-            '<div style="font-family:monospace;font-size:14px;font-weight:600;color:#e8a020;letter-spacing:.06em">NO SCHEDULE FOR ' + date + '</div>',
-            '<div style="font-size:13px;line-height:1.6;max-width:360px">',
-            'No schedule has been saved for this date yet.<br>',
-            'Generate one on your local Mac — it will appear here automatically.',
+        // Ops-only: show inline date picker so manager can load any saved schedule
+        var emptyEl = document.getElementById('empty-state');
+        if (emptyEl) {
+          emptyEl.style.display = 'flex';
+          emptyEl.innerHTML = [
+            '<div style="display:flex;flex-direction:column;align-items:center;gap:20px;padding:48px 24px;text-align:center">',
+            '<div style="font-size:42px">📋</div>',
+            '<div style="font-size:16px;font-weight:600;color:var(--text,#1e293b)">No schedule for ' + date + '</div>',
+            '<div style="font-size:13px;color:var(--muted,#64748b);max-width:340px;line-height:1.6">',
+            'Generate a schedule on your local Mac — it will appear here automatically.<br>',
+            'Or load a previously saved schedule:',
             '</div>',
-            '<div style="font-size:12px;color:#4a5c7a;margin-top:8px">Use the date picker above to load a previous schedule.</div>',
+            '<div id="ops-date-list" style="display:flex;flex-direction:column;gap:6px;width:100%;max-width:320px"></div>',
             '</div>'
           ].join('');
+          // Populate the date list
+          var token2 = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY);
+          fetch('/api/daily/dates', {headers:{'X-Auth-Token':token2}})
+            .then(function(r){return r.json();})
+            .then(function(dd){
+              var container = document.getElementById('ops-date-list');
+              if (!container || !dd.dates) return;
+              dd.dates.slice(0,8).forEach(function(d2){
+                var btn = document.createElement('button');
+                var dDate = d2.date || d2;
+                var dDay  = (d2.day_of_week||'').slice(0,3);
+                btn.textContent = dDate + (dDay ? '  ' + dDay : '');
+                btn.style.cssText = [
+                  'padding:10px 16px',
+                  'background:var(--surface,#f8fafc)',
+                  'border:1px solid var(--border,#e2e8f0)',
+                  'border-radius:8px',
+                  'font-size:13px',
+                  'font-family:monospace',
+                  'cursor:pointer',
+                  'color:var(--text,#1e293b)',
+                  'transition:background .15s'
+                ].join(';');
+                btn.onmouseover = function(){ this.style.background='var(--border2,#e2e8f0)'; };
+                btn.onmouseout  = function(){ this.style.background='var(--surface,#f8fafc)'; };
+                btn.onclick = function(){ loadSavedSchedule(dDate, 'combined'); };
+                container.appendChild(btn);
+              });
+            }).catch(function(){});
         }
       } else if (role === 'manager' || role === 'admin' || role === 'supervisor') {
-        // Mac/local: show generate panel
         document.getElementById('empty-state') &&
           (document.getElementById('empty-state').style.display = '');
       } else {
@@ -6106,7 +6133,15 @@ function loadScheduleDates() {
 function renderDatePicker(dates) {
   var existing = document.getElementById('recent-dates');
   if (existing) existing.remove();
+  var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
   var sidebar = document.getElementById('sidebar');
+  // In ops mode, attach to main content area instead of hidden sidebar
+  if (opsOnly) {
+    var opsList = document.getElementById('ops-date-list');
+    if (opsList) return; // already rendered inline
+    // Render as a floating panel in main content
+    sidebar = document.getElementById('main-content') || document.querySelector('main') || document.body;
+  }
   if (!sidebar) return;
 
   var div = document.createElement('div');
