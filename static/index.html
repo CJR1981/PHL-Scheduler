@@ -529,6 +529,8 @@
   .btn-op:hover { background:var(--surface); border-color:var(--accent); color:var(--accent); }
   .btn-op:disabled { opacity:.4; cursor:not-allowed; }
   .btn-sick:hover  { border-color:var(--danger); color:var(--danger); }
+  .btn-gate        { border-color:#d97706; color:#d97706; }
+  .btn-gate:hover  { border-color:#b45309; color:#b45309; background:#fff7ed; }
   .btn-print { padding:6px 12px; border-radius:var(--radius); font-size:12px; font-weight:600;
     cursor:pointer; border:1px solid var(--border); background:var(--surface2);
     color:var(--text2); transition:all .15s; font-family:var(--sans); }
@@ -711,7 +713,7 @@ body.authenticated #login-screen { display: none !important; }
       <div style="margin-bottom:16px">
         <label style="display:block;font-size:11px;font-weight:700;color:#374151;
           text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Username</label>
-        <input id="login-username" type="text" placeholder="e.g. crologas"
+        <input id="login-username" type="text" placeholder="Username"
           autocomplete="username" autocapitalize="none"
           style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;
             font-size:14px;box-sizing:border-box;outline:none"
@@ -951,6 +953,7 @@ body.authenticated #login-screen { display: none !important; }
         <span class="live-ops-label">Live Ops</span>
         <button class="btn-op btn-sick"  id="btn-sick"  onclick="openModal('sick')"  disabled>Sick Call</button>
         <button class="btn-op btn-delay" id="btn-delay" onclick="openModal('delay')" disabled>Flight Delay</button>
+        <button class="btn-op btn-gate"  id="btn-gate"  onclick="openGateChangeModal()" disabled>Gate Change</button>
         <button class="btn-op btn-move"  id="btn-move"  onclick="openModal('move')"  disabled>Reassign Flight</button>
         <span id="live-ops-hint" style="font-size:11px;color:var(--muted);margin-left:4px">
           Generate a schedule to enable
@@ -1373,85 +1376,111 @@ body.authenticated #login-screen { display: none !important; }
 
 <!-- Delay Modal -->
 <div class="op-modal" id="modal-delay">
-  <div class="op-panel" style="width:min(660px,96vw)">
-    <h3>Flight Delay / Gate Change</h3>
-    <div class="op-field">
-      <label>FLIGHT NUMBER</label>
-      <div style="position:relative">
-        <input type="text" id="delay-flight" placeholder="Type flight number or destination…"
-               oninput="filterDelayFlights()" autocomplete="off"
-               style="width:100%;padding:8px 10px;border:1px solid var(--border);
-                      border-radius:var(--radius);font-family:var(--sans);font-size:13px;
-                      background:var(--surface);color:var(--text)">
-        <div id="delay-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;
-             z-index:50;background:var(--surface);border:1px solid var(--border);
-             border-radius:var(--radius);box-shadow:var(--shadow-md);
-             max-height:220px;overflow-y:auto;margin-top:2px"></div>
+  <div class="op-panel" style="width:min(720px,96vw);padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:92vh">
+
+    <!-- ── Header ── -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 24px 14px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:var(--text)">Live Operations</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.07em">Flight Delay / Gate Change</div>
       </div>
-    </div>
-    <div id="delay-flight-card" style="display:none;background:var(--surface2);
-         border:1px solid var(--border2);border-radius:var(--radius);
-         padding:10px 14px;margin-bottom:10px;font-size:12px">
-      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">
-        <div><span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em">Flight</span><br>
-          <span id="dfc-flight" style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--accent)"></span></div>
-        <div><span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em">Dest</span><br>
-          <span id="dfc-dest" style="font-size:13px;font-weight:600"></span></div>
-        <div><span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em">Current STD</span><br>
-          <span id="dfc-std" style="font-family:var(--mono);font-size:13px;font-weight:600"></span></div>
-        <div><span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em">Gate</span><br>
-          <span id="dfc-gate" style="font-family:var(--mono);font-size:13px"></span></div>
-        <div><span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em">Assigned Team</span><br>
-          <span id="dfc-team" style="font-family:var(--mono);font-size:13px;font-weight:700"></span></div>
-      </div>
-      <!-- Rich team context: shift window + before/after flights -->
-      <div id="dfc-team-context" style="display:none;margin-top:10px;padding-top:8px;
-           border-top:1px solid var(--border2)"></div>
+      <button onclick="closeModal('delay')" style="background:none;border:none;font-size:20px;color:var(--muted);cursor:pointer;padding:4px;line-height:1">&times;</button>
     </div>
 
-    <!-- Two sub-panels: delay time OR gate change -->
-    <div id="delay-type-tabs" style="display:none;margin-bottom:12px">
-      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
-        <button id="tab-delay-time" onclick="setDelayType('time')"
-          style="flex:1;padding:7px;border:none;background:var(--accent);color:#fff;
-                 font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">
-          New Departure Time
-        </button>
-        <button id="tab-gate-change" onclick="setDelayType('gate')"
-          style="flex:1;padding:7px;border:none;background:var(--surface2);color:var(--muted);
-                 font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;
-                 border-left:1px solid var(--border)">
-          Gate Change
-        </button>
-      </div>
-    </div>
+    <div style="overflow-y:auto;flex:1">
 
-    <div id="delay-time-panel">
-      <div class="op-field">
-        <label>NEW DEPARTURE TIME (HH:MM)</label>
+      <!-- ── Flight search ── -->
+      <div style="padding:20px 24px 0">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:6px">Flight Number</div>
+        <div style="position:relative">
+          <input type="text" id="delay-flight" placeholder="Type flight number or destination…"
+                 oninput="filterDelayFlights()" autocomplete="off"
+                 style="width:100%;padding:9px 12px;border:1px solid var(--border);font-family:var(--mono);
+                        font-size:14px;background:var(--surface);color:var(--text);box-sizing:border-box">
+          <div id="delay-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;
+               z-index:50;background:var(--surface);border:1px solid var(--border);
+               box-shadow:var(--shadow-md);max-height:220px;overflow-y:auto;margin-top:2px"></div>
+        </div>
+      </div>
+
+      <!-- ── Flight + Team info card ── -->
+      <div id="delay-flight-card" style="display:none;margin:16px 24px 0;border:1px solid var(--border)">
+
+        <!-- Flight details row -->
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--border)">
+          <div style="padding:12px 16px;border-right:1px solid var(--border2)">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:4px">Flight</div>
+            <div id="dfc-flight" style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent)"></div>
+          </div>
+          <div style="padding:12px 16px;border-right:1px solid var(--border2)">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:4px">Destination</div>
+            <div id="dfc-dest" style="font-size:15px;font-weight:700;color:var(--text)"></div>
+          </div>
+          <div style="padding:12px 16px;border-right:1px solid var(--border2)">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:4px">Current STD</div>
+            <div id="dfc-std" style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--text)"></div>
+          </div>
+          <div style="padding:12px 16px;border-right:1px solid var(--border2)">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:4px">Gate</div>
+            <div id="dfc-gate" style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--text)"></div>
+          </div>
+          <div style="padding:12px 16px">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:4px">Assigned Team</div>
+            <div id="dfc-team" style="font-family:var(--mono);font-size:15px;font-weight:700"></div>
+          </div>
+        </div>
+
+        <!-- Team context block -->
+        <div id="dfc-team-context" style="display:none;background:var(--surface2)"></div>
+      </div>
+
+      <!-- ── Change type tabs ── -->
+      <div id="delay-type-tabs" style="display:none;padding:20px 24px 0">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:8px">Change Type</div>
+        <div style="display:flex;border:1px solid var(--border)">
+          <button id="tab-delay-time" onclick="setDelayType('time')"
+            style="flex:1;padding:9px 0;border:none;background:var(--accent);color:#fff;
+                   font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em">
+            New Departure Time
+          </button>
+          <button id="tab-gate-change" onclick="setDelayType('gate')"
+            style="flex:1;padding:9px 0;border:none;background:var(--surface);color:var(--muted);
+                   font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;
+                   border-left:1px solid var(--border);letter-spacing:.03em">
+            Gate Change
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Input panels ── -->
+      <div id="delay-time-panel" style="padding:16px 24px 0">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:6px">New Departure Time (HH:MM)</div>
         <input type="text" id="delay-time" placeholder="e.g. 09:45" oninput="previewDelay()"
-               style="font-family:var(--mono)">
+               style="width:100%;padding:9px 12px;border:1px solid var(--border);font-family:var(--mono);
+                      font-size:16px;background:var(--surface);color:var(--text);box-sizing:border-box">
+        <div id="delay-preview" style="font-size:12px;color:var(--muted);padding:8px 0;display:none"></div>
       </div>
-    </div>
-    <div id="delay-gate-panel" style="display:none">
-      <div class="op-field">
-        <label>NEW GATE (e.g. B14)</label>
+
+      <div id="delay-gate-panel" style="display:none;padding:16px 24px 0">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:6px">New Gate</div>
         <input type="text" id="delay-gate" placeholder="e.g. B14"
-               style="font-family:var(--mono);text-transform:uppercase">
+               style="width:100%;padding:9px 12px;border:1px solid var(--border);font-family:var(--mono);
+                      font-size:16px;text-transform:uppercase;background:var(--surface);color:var(--text);box-sizing:border-box">
       </div>
+
+      <!-- ── Cascade impact panel ── -->
+      <div id="delay-cascade" style="display:none;margin:16px 24px 0;border:1px solid var(--border);max-height:320px;overflow-y:auto"></div>
+
+      <div class="op-result" id="delay-result" style="margin:12px 24px 0"></div>
+
+    </div><!-- end scroll area -->
+
+    <!-- ── Footer actions ── -->
+    <div style="display:flex;gap:10px;padding:16px 24px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface)">
+      <button class="btn-cancel" onclick="closeModal('delay')" style="padding:9px 20px">Cancel</button>
+      <button class="btn-confirm" id="delay-confirm" onclick="submitDelay()" style="flex:1;padding:9px 0">Analyse Impact</button>
     </div>
 
-    <div id="delay-preview" style="font-size:12px;color:var(--muted);padding:6px 0;display:none"></div>
-
-    <!-- Cascade impact panel — shown after analyse -->
-    <div id="delay-cascade" style="display:none;margin:10px 0;max-height:340px;overflow-y:auto;
-         padding-right:2px"></div>
-
-    <div class="op-result" id="delay-result"></div>
-    <div class="op-actions">
-      <button class="btn-cancel" onclick="closeModal('delay')">Cancel</button>
-      <button class="btn-confirm" id="delay-confirm" onclick="submitDelay()">Analyse Impact</button>
-    </div>
   </div>
 </div>
 
@@ -1860,7 +1889,7 @@ async function runSchedule() {
     renderResults(data);
     populateLiveOpsDropdowns(data);
     // Enable live ops buttons now that we have a session
-    ['btn-sick','btn-delay','btn-move','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = false;
     });
@@ -1873,6 +1902,15 @@ async function runSchedule() {
 }
 
 // ── Live Ops Modals ───────────────────────────────────────────────────────
+// ── Gate Change shortcut ─────────────────────────────────────────────────
+// Opens the delay modal directly on the Gate Change tab, bypassing the
+// "Flight Delay" tab so dispatchers don't have to switch manually.
+function openGateChangeModal() {
+  openModal('delay');
+  // Small delay so the modal DOM is visible before we toggle tabs
+  setTimeout(() => setDelayType('gate'), 50);
+}
+
 function openModal(type) {
   if (!sessionId && !scheduleData) {
     alert('Click "Generate Schedule" first to create a live session, then use Live Ops.');
@@ -2090,56 +2128,7 @@ function previewMove() {
   });
 
   recs.style.display = 'block';
-  recsList.innerHTML = '';
-  if (topRecs.length === 0) {
-    const anyOnShift = onShift_all.length > 0;
-    const msg = anyOnShift
-      ? 'All on-shift teams are at capacity. You can still manually assign below — a warning will be shown.'
-      : 'No teams are on shift at this departure time. You can still manually assign below.';
-    recsList.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:10px 12px;
-      background:var(--surface2);border:1px solid var(--border2);border-radius:6px">${msg}</div>`;
-  } else {
-    topRecs.forEach((item, idx) => {
-      const isGate  = item.gateScore >= 60;
-      const isFirst = idx === 0;
-      const isOverCap = !item.hasRoom;
-      let badgeHtml = '';
-      if (isOverCap && item.timingFeasible) {
-        const freeStr = item.freeAt ? (() => { const h=Math.floor(item.freeAt/60)%24; const m=item.freeAt%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; })() : '—';
-        badgeHtml = `<span style="font-size:9px;font-weight:700;background:#fff7ed;color:#92400e;border:1px solid #fed7aa;padding:2px 6px;border-radius:3px;margin-left:6px">OVER CAP — FREE BY ${freeStr}</span>`;
-      } else if (isGate && item.nearbyOp) {
-        badgeHtml = `<span style="font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:3px;margin-left:6px">GATE ${item.nearbyOp.gate} NEARBY</span>`;
-      } else if (isFirst) {
-        badgeHtml = `<span style="font-size:9px;font-weight:700;background:#dbeafe;color:var(--accent);padding:2px 6px;border-radius:3px;margin-left:6px">BEST</span>`;
-      }
-      const hint = isGate && item.nearbyOp && !isOverCap
-        ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">serving ${item.nearbyOp.flight} at ${item.nearbyOp.gate} at ${item.nearbyOp.std}</span>` : '';
-      const capNote = isOverCap
-        ? `<span style="font-size:11px;color:var(--warn)">+1 over cap</span>` : '';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.style.cssText = `width:100%;background:${isOverCap?'#fffbeb':'var(--surface2)'};border:1px solid ${isOverCap?'#fed7aa':'var(--border)'};border-radius:6px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;color:var(--text);font-family:var(--sans);text-align:left;margin-bottom:6px;`;
-      btn.innerHTML = `
-        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
-          <span style="font-family:var(--mono);font-size:14px;font-weight:700;color:var(--accent)">${item.t.team_id}</span>
-          ${badgeHtml}
-          <span style="font-size:11px;color:var(--muted)">${item.t.shift}</span>
-          ${hint}
-        </div>
-        <div style="display:flex;gap:14px;font-size:11px;flex-shrink:0">
-          <span style="color:var(--muted)">${item.fc}/${item.cap} flights</span>
-          <span style="color:var(--muted)">Last: ${item.t.last_std||'—'}</span>
-          ${isOverCap ? capNote : `<span style="color:${item.headroom>=2?'var(--ok)':'var(--warn)'}">+${item.headroom} slots</span>`}
-        </div>`;
-      btn.onclick = () => {
-        selectMoveTeam(item.t.team_id);
-        recsList.querySelectorAll('button').forEach(b => b.style.borderColor='var(--border)');
-        btn.style.borderColor = 'var(--accent)';
-      };
-      btn.onmouseenter = () => { renderMovePreview(item.t.team_id); };
-      recsList.appendChild(btn);
-    });
-  }
+  recsList.innerHTML = ''; // recs-list now unused — unified list handles everything
 
   // ── Custom team list — replaces native <select> ───────────────────────
   if (countLbl) countLbl.textContent =
@@ -2153,70 +2142,167 @@ function previewMove() {
 }
 
 function renderMoveTeamList(scored, onShift_all, offShift_all) {
-  const list = document.getElementById('move-team-list');
+  const list     = document.getElementById('move-team-list');
+  const recsList = document.getElementById('move-recs-list');
   if (!list) return;
-  const q = (document.getElementById('move-team-search')?.value || '').toLowerCase();
+
+  const q          = (document.getElementById('move-team-search')?.value || '').toLowerCase();
   const selectedId = document.getElementById('move-team-select')?.value || '';
+  const fn         = document.getElementById('move-flight')?.value.trim() || '';
+  const candA      = (scheduleData?.assignments || []).find(x => x.flight === fn);
+  const candU      = (scheduleData?.unassigned   || []).find(x => x.flight === fn);
+  const currentTeam= (candA || candU)?.team || null;
 
-  const makeRow = (item, section) => {
-    const { t, fc, cap, hasRoom, onShift, timingFeasible, freeAt } = item;
-    const tid = t.team_id;
-    if (q && !tid.toLowerCase().includes(q) && !t.shift.toLowerCase().includes(q)) return '';
+  // ── Status chip factory ─────────────────────────────────────────────────
+  const chip = (text, bg, color, border='transparent') =>
+    `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:${bg};color:${color};border:1px solid ${border};white-space:nowrap">${text}</span>`;
+
+  // ── Build a unified row ─────────────────────────────────────────────────
+  const makeRow = (item) => {
+    const { t, fc, cap, hasRoom, onShift, timingFeasible, freeAt, gateScore, nearbyOp, score } = item;
+    const tid      = t.team_id;
+    const isCurrent = tid === currentTeam;
     const isSelected = tid === selectedId;
-    const isAtCap = !hasRoom;
-    const isOff = !onShift;
+    const isAtCap  = !hasRoom;
+    const isOff    = !onShift;
 
-    // Badge
-    let badge = '';
-    if (isAtCap && timingFeasible && freeAt) {
-      const fh = Math.floor(freeAt/60)%24, fm = freeAt%60;
-      const freeStr = `${String(fh).padStart(2,'0')}:${String(fm).padStart(2,'0')}`;
-      badge = `<span style="font-size:9px;font-weight:700;background:#fff7ed;color:#92400e;border:1px solid #fed7aa;padding:1px 5px;border-radius:3px">FREE ${freeStr}</span>`;
-    } else if (isOff) {
-      badge = `<span style="font-size:9px;font-weight:700;background:#f1f5f9;color:var(--muted);padding:1px 5px;border-radius:3px">OFF SHIFT</span>`;
+    if (q && !tid.toLowerCase().includes(q) && !(t.shift||'').toLowerCase().includes(q)) return '';
+    if (isCurrent) return ''; // current team shown separately at top
+
+    // Status chips
+    const chips = [];
+    if (isOff) {
+      chips.push(chip('Off Shift', '#f1f5f9', '#64748b'));
+    } else if (isAtCap && timingFeasible) {
+      const freeStr = freeAt ? min2t(freeAt) : '—';
+      chips.push(chip(`Free ${freeStr}`, '#fff7ed', '#c2410c', '#fed7aa'));
     } else if (isAtCap) {
-      badge = `<span style="font-size:9px;font-weight:700;background:#fef2f2;color:var(--danger);border:1px solid #fecaca;padding:1px 5px;border-radius:3px">AT CAP</span>`;
+      chips.push(chip('At Cap', '#fef2f2', '#dc2626', '#fecaca'));
     }
 
-    const capacityColor = isAtCap ? 'var(--danger)' : fc >= cap-1 ? 'var(--warn)' : 'var(--ok)';
-    const bg = isSelected ? '#eef2ff' : 'transparent';
-    const border = isSelected ? 'border-left:3px solid var(--accent)' : 'border-left:3px solid transparent';
+    // Priority badges (only for non-off-shift)
+    if (!isOff) {
+      if (gateScore >= 80 && nearbyOp) chips.unshift(chip(`Gate ${nearbyOp.gate} ↔`, '#fef9c3', '#854d0e'));
+      else if (gateScore >= 60 && nearbyOp) chips.unshift(chip(`Near ${nearbyOp.gate}`, '#fefce8', '#a16207'));
+    }
+
+    const capacityColor = isAtCap ? '#dc2626' : fc >= cap-1 ? '#d97706' : '#16a34a';
+    const rowBg    = isSelected ? '#eff6ff' : 'transparent';
+    const leftBdr  = isSelected ? '4px solid var(--accent)' : '4px solid transparent';
+    const teamColor= isSelected ? 'var(--accent)' : isOff ? 'var(--muted)' : 'var(--text)';
+    const opacity  = isOff && !timingFeasible ? '0.45' : '1';
 
     return `<div onclick="selectMoveTeam('${tid}')" data-tid="${tid}"
-      style="${border};background:${bg};padding:10px 14px;cursor:pointer;
-             border-bottom:1px solid var(--border2);display:flex;
-             align-items:center;justify-content:space-between;gap:12px;
-             opacity:${isOff&&!timingFeasible?'.5':'1'}"
-      onmouseover="if(!this.classList.contains('selected'))this.style.background='#f8faff';renderMovePreview('${tid}')"
-      onmouseout="this.style.background='${bg}'">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-family:var(--mono);font-size:13px;font-weight:700;
-                     color:${isSelected?'var(--accent)':'var(--text)'};min-width:52px">${tid}</span>
-        <span style="font-size:11px;color:var(--muted)">${t.shift}</span>
-        ${badge}
+      style="border-left:${leftBdr};background:${rowBg};padding:9px 14px;cursor:pointer;
+             border-bottom:1px solid var(--border2);display:flex;align-items:center;
+             justify-content:space-between;gap:10px;opacity:${opacity};transition:background .1s"
+      onmouseover="this.style.background=this.getAttribute('data-sel')==='1'?'#eff6ff':'#f8faff';renderMovePreview('${tid}')"
+      onmouseout="this.style.background='${rowBg}'"
+      data-sel="${isSelected?'1':'0'}">
+      <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-family:var(--mono);font-size:14px;font-weight:800;color:${teamColor};min-width:52px">${tid}</span>
+          ${isSelected ? chip('✓ Selected','#dbeafe','var(--accent)','#93c5fd') : ''}
+          ${chips.join('')}
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${t.shift||'—'}</div>
       </div>
-      <div style="display:flex;gap:16px;align-items:center;flex-shrink:0;font-size:11px">
-        <span style="color:${capacityColor};font-family:var(--mono)">${fc}/${cap}</span>
-        ${t.last_std ? `<span style="color:var(--muted)">Last ${t.last_std}</span>` : ''}
-        ${isSelected ? '<span style="color:var(--accent);font-weight:600">&#10003; Selected</span>' : ''}
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0">
+        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${capacityColor}">${fc}/${cap}</span>
+        ${t.last_std ? `<span style="font-size:10px;color:var(--muted)">Last ${t.last_std}</span>` : ''}
       </div>
     </div>`;
   };
 
+  // ── Current team row (always at top, muted, non-selectable) ────────────
+  const currentItem = scored.find(x => x.t.team_id === currentTeam);
+  let currentRowHtml = '';
+  if (currentItem && !q) {
+    const { t, fc, cap } = currentItem;
+    currentRowHtml = `<div style="padding:7px 14px;border-bottom:1px solid var(--border2);
+        background:#f8fafc;display:flex;align-items:center;justify-content:space-between;gap:10px;opacity:.65">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-family:var(--mono);font-size:14px;font-weight:800;color:var(--muted)">${t.team_id}</span>
+          ${chip('Current','#e2e8f0','#64748b')}
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${t.shift||'—'}</div>
+      </div>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">${fc}/${cap}</span>
+    </div>`;
+  }
+
+  // ── Recommended section (top 4: gate nearby + under-cap first) ─────────
+  const seen = new Set();
+  if (currentTeam) seen.add(currentTeam);
+  const topRecs = [];
+  // Gate nearby + under cap
+  onShift_all.filter(x => x.gateScore >= 60 && x.hasRoom).forEach(x => {
+    if (!seen.has(x.t.team_id)) { topRecs.push(x); seen.add(x.t.team_id); }
+  });
+  // Under cap, any
+  onShift_all.filter(x => x.hasRoom).forEach(x => {
+    if (!seen.has(x.t.team_id) && topRecs.length < 3) { topRecs.push(x); seen.add(x.t.team_id); }
+  });
+  // Over cap but timing feasible
+  onShift_all.filter(x => !x.hasRoom && x.timingFeasible).forEach(x => {
+    if (!seen.has(x.t.team_id) && topRecs.length < 4) { topRecs.push(x); seen.add(x.t.team_id); }
+  });
+
+  const recSeen = new Set(topRecs.map(x => x.t.team_id));
+
+  // Remaining on-shift (not in recs, not current)
+  const restOnShift = onShift_all.filter(x => !recSeen.has(x.t.team_id) && x.t.team_id !== currentTeam);
+  const offShiftFiltered = offShift_all.filter(x => x.t.team_id !== currentTeam);
+
+  // ── Section header ──────────────────────────────────────────────────────
+  const sectionHdr = (label, count) =>
+    `<div style="padding:5px 14px;font-size:10px;font-weight:700;letter-spacing:.07em;
+      color:var(--muted);text-transform:uppercase;background:var(--surface2);
+      border-bottom:1px solid var(--border2);position:sticky;top:0;z-index:1">${label}${count !== undefined ? ` <span style="font-weight:500;opacity:.7">(${count})</span>` : ''}</div>`;
+
   let html = '';
-  if (onShift_all.length) {
-    html += `<div style="padding:6px 14px;font-size:10px;font-weight:700;letter-spacing:.07em;
-      color:var(--muted);text-transform:uppercase;background:var(--surface2);
-      border-bottom:1px solid var(--border2)">On Shift</div>`;
-    html += onShift_all.map(item => makeRow(item, 'on')).join('');
+
+  // Current team pinned at top
+  html += currentRowHtml;
+
+  // Recommended
+  const recRows = topRecs.map(makeRow).filter(Boolean);
+  if (recRows.length) {
+    html += sectionHdr('Recommended', recRows.length);
+    html += recRows.join('');
   }
-  if (offShift_all.length) {
-    html += `<div style="padding:6px 14px;font-size:10px;font-weight:700;letter-spacing:.07em;
-      color:var(--muted);text-transform:uppercase;background:var(--surface2);
-      border-bottom:1px solid var(--border2);border-top:1px solid var(--border)">Off Shift</div>`;
-    html += offShift_all.map(item => makeRow(item, 'off')).join('');
+
+  // Rest of on-shift
+  const restRows = restOnShift.map(makeRow).filter(Boolean);
+  if (restRows.length) {
+    html += sectionHdr('On Shift', restRows.length);
+    html += restRows.join('');
   }
-  list.innerHTML = html || '<div style="padding:14px;color:var(--muted);font-size:12px">No teams match filter</div>';
+
+  // Off shift
+  const offRows = offShiftFiltered.map(makeRow).filter(Boolean);
+  if (offRows.length) {
+    html += sectionHdr('Off Shift', offRows.length);
+    html += offRows.join('');
+  }
+
+  if (!html) {
+    html = `<div style="padding:20px 14px;font-size:12px;color:var(--muted);text-align:center">No teams match filter</div>`;
+  }
+
+  list.innerHTML = html;
+
+  // Keep recs-list hidden — unified list is the single source
+  if (recsList) recsList.innerHTML = '';
+}
+
+function filterMoveTeams() {
+  if (window._moveScored) {
+    const onShift_all  = window._moveScored.filter(x => x.onShift && !x.isCurr);
+    const offShift_all = window._moveScored.filter(x => !x.onShift && !x.isCurr);
+    renderMoveTeamList(window._moveScored, onShift_all, offShift_all);
+  }
 }
 
 function selectMoveTeam(tid) {
@@ -2225,7 +2311,7 @@ function selectMoveTeam(tid) {
   const confirmBtn = document.getElementById('move-confirm');
   if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.style.opacity='1'; confirmBtn.style.cursor='pointer'; }
 
-  // Show warning if over cap or off shift
+  // Warning banner
   const res = document.getElementById('move-result');
   const scored = window._moveScored || [];
   const item = scored.find(x => x.t.team_id === tid);
@@ -2239,148 +2325,102 @@ function selectMoveTeam(tid) {
     res.style.display = 'none';
   }
 
-  // Re-render list to show selection state
+  // Re-render list to show selected state
   if (window._moveScored) {
     const onShift_all  = window._moveScored.filter(x => x.onShift && !x.isCurr);
     const offShift_all = window._moveScored.filter(x => !x.onShift && !x.isCurr);
     renderMoveTeamList(window._moveScored, onShift_all, offShift_all);
   }
-
-  // Render schedule preview for selected team
   renderMovePreview(tid);
 }
 
 function renderMovePreview(tid) {
   const panel = document.getElementById('move-preview-panel');
+  const emptyState = document.getElementById('move-preview-empty');
   if (!panel) return;
 
   const scored = window._moveScored || [];
   const item   = scored.find(x => x.t.team_id === tid);
-  const team   = item ? item.t : (scheduleData.team_summary||[]).find(t => t.team_id === tid);
-  const empS = document.getElementById('move-preview-empty');
-  if (!team) { panel.style.display = 'none'; if (empS) empS.style.display = ''; return; }
+  // Prefer fullScheduleData team_summary (most recent live state) over scored item
+  // which may be built from stale pre-delay scheduleData
+  const liveTeam = (fullScheduleData?.team_summary || scheduleData?.team_summary || []).find(t => t.team_id === tid);
+  const team   = liveTeam || (item ? item.t : null);
+  if (!team) { panel.style.display = 'none'; if (emptyState) emptyState.style.display = ''; return; }
 
-  const fn   = document.getElementById('move-flight').value.trim();
-  const candA = (scheduleData.assignments||[]).find(x => x.flight === fn);
-  const candU = (scheduleData.unassigned||[]).find(x => x.flight === fn);
+  const fn    = document.getElementById('move-flight')?.value.trim() || '';
+  const candA = (scheduleData?.assignments||[]).find(x => x.flight === fn);
+  const candU = (scheduleData?.unassigned||[]).find(x => x.flight === fn);
   const cand  = candA || candU;
-  if (!cand) { panel.style.display = 'none'; if (document.getElementById('move-preview-empty')) document.getElementById('move-preview-empty').style.display = ''; return; }
+  if (!cand) { panel.style.display = 'none'; if (emptyState) emptyState.style.display = ''; return; }
 
-  const candStdMin = (cand.std_min && cand.std_min > 0)
-    ? cand.std_min : (cand.std ? t2min(cand.std) : 0);
+  if (emptyState) emptyState.style.display = 'none';
+  panel.style.display = 'block';
 
-  // ── Timing constants (mirror scheduler_engine.py) ──────────────────────
-  const FINISH_BUF   = 35;   // domestic target buffer before departure (min)
-  const SVC_TIME     = 15;   // default service time (min)
-  const DRV_TIME     = 14;   // default drive time kitchen→gate (min)
-  const DOCK_RELOAD  = 15;   // dock reload (min)
-  const TURNAROUND   = 5;    // team turnaround after return (min)
-
-  // Candidate: latest acceptable dispatch = STD - finBuf - svc - drive
+  const candStdMin = cand.std_min > 0 ? cand.std_min : (cand.std ? t2min(cand.std) : 0);
+  const FINISH_BUF = 35, SVC_TIME = 15, DRV_TIME = 14, TURNAROUND = 5;
   const candLatestDisp = candStdMin - FINISH_BUF - SVC_TIME - DRV_TIME;
-  // Candidate: estimate team_free after servicing = STD - finBuf + drive + turnaround
   const candFreeEst    = candStdMin - FINISH_BUF + DRV_TIME + TURNAROUND;
-  // Candidate: earliest useful dispatch = STD - 3hr rule
-  const candEarliestDisp = candStdMin - 180;
 
-  // ── Sort existing ops by dispatch time ─────────────────────────────────
-  const _opMin = op => (op.std_min && op.std_min > 0) ? op.std_min
-    : (op.std ? t2min(op.std) : (op.dispatch_min||0));
-  const existing = (team.operations||[]).slice().sort((a,b)=>_opMin(a)-_opMin(b));
+  // ── Timing feasibility ──────────────────────────────────────────────────
+  const _opMin = op => op.std_min > 0 ? op.std_min : (op.std ? t2min(op.std) : (op.dispatch_min||0));
+  // Use live assignments from scheduleData as primary source — this reflects all live ops
+  // changes (delays, reassigns) that update the assignments array but may not rebuild team_summary.
+  const liveAssignments = (scheduleData?.assignments || fullScheduleData?.assignments || []);
+  const liveOpsForTeam = liveAssignments
+    .filter(a => a.team === tid)
+    .map(a => ({...a, std_min: a.std_min || (a.std ? t2min(a.std) : 0)}));
+  // Fall back to team.operations if live assignments don't have this team yet
+  const existing = (liveOpsForTeam.length > 0 ? liveOpsForTeam : (team.operations||[]))
+    .slice().sort((a,b)=>_opMin(a)-_opMin(b));
 
-  // ── Find the last op that ends before the candidate needs to dispatch ──
-  // This tells us if the team is actually free in time.
-  // team_free_min is when the team returns from their last op and is available again.
-  let lastConflictOp = null;  // last op whose team_free_min > candLatestDisp
-  let teamFreeAtCandTime = 0; // when team will actually be free
-
+  let lastConflictOp = null, teamFreeAtCandTime = 0;
   existing.forEach(op => {
-    const opStd = _opMin(op);
-    if (opStd >= candStdMin) return; // ops after candidate don't block dispatch
-    const opFree = op.team_free_min > 0 ? op.team_free_min
-      : (opStd + SVC_TIME + DRV_TIME + TURNAROUND); // rough if missing
+    if (_opMin(op) >= candStdMin) return;
+    const opFree = op.team_free_min > 0 ? op.team_free_min : (_opMin(op) + SVC_TIME + DRV_TIME + TURNAROUND);
     if (opFree > teamFreeAtCandTime) {
       teamFreeAtCandTime = opFree;
       if (opFree > candLatestDisp) lastConflictOp = op;
     }
   });
 
-  // ── Real feasibility verdict ───────────────────────────────────────────
-  // Three failure modes:
-  // 1. Team not free in time (team_free_min > latest dispatch needed)
-  // 2. Shift doesn't cover the departure
-  // 3. Would go over cap (warning, not hard block)
   const ss = team.shift_start || 0;
-  const se_str = (team.shift||'').replace(/\u2013|\u2014/g,'–').split('–')[1] || '';
-  const seMin  = se_str ? (()=>{ const p=se_str.split(':'); return parseInt(p[0]||0)*60+parseInt(p[1]||0); })() : 1440;
-  const shiftStartsInTime = ss <= candLatestDisp;
-  const shiftEndsAfterStd = seMin >= candStdMin;
-  const shiftOk = shiftStartsInTime && shiftEndsAfterStd;
-
-  const fc      = team.flight_count || team.ops || 0;
-  const cap     = team.cap || 5;
-  const newFc   = fc + 1;
-  const overCap = newFc > cap;
-  const atCap   = newFc === cap;
-
-  // Timing conflict: team genuinely cannot service this flight
+  const seStr = (team.shift||'').replace(/–|—/g,'–').split('–')[1]||'';
+  const seMin = seStr ? (()=>{const p=seStr.split(':');return parseInt(p[0]||0)*60+parseInt(p[1]||0);})() : 1440;
+  const shiftOk = ss <= candLatestDisp && seMin >= candStdMin;
   const timingConflict = lastConflictOp !== null;
-  const timingGap      = candLatestDisp - teamFreeAtCandTime; // negative = conflict
-  const freeAtStr      = (() => {
-    const m = Math.round(teamFreeAtCandTime); const h=Math.floor(m/60)%24; const mn=m%60;
-    return `${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;
-  })();
-  const needsDispStr = (() => {
-    const m = Math.round(candLatestDisp); const h=Math.floor(m/60)%24; const mn=m%60;
-    return `${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;
-  })();
-
-  // ── Overall verdict banner ─────────────────────────────────────────────
   const hardConflict = timingConflict || !shiftOk;
+  const fc = team.flight_count || team.ops || 0;
+  const cap = team.cap || 5;
+  const overCap = fc + 1 > cap;
+
+  const freeAtStr = (() => { const m=Math.round(teamFreeAtCandTime); return `${String(Math.floor(m/60)%24).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; })();
+  const needsDispStr = (() => { const m=Math.round(candLatestDisp); return `${String(Math.floor(m/60)%24).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; })();
+
+  // ── Verdict banner ──────────────────────────────────────────────────────
   let verdictHtml;
   if (hardConflict) {
     const reasons = [];
     if (timingConflict) reasons.push(`schedule full until ${freeAtStr}, dispatch needed by ${needsDispStr}`);
-    if (!shiftStartsInTime) reasons.push(`shift starts at ${min2t(ss)}, too late to dispatch by ${needsDispStr}`);
-    if (!shiftEndsAfterStd) reasons.push(`shift ends before STD ${cand.std}`);
-    verdictHtml = `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:10px">
+    if (!shiftOk && ss > candLatestDisp) reasons.push(`shift starts ${min2t(ss)}, too late`);
+    if (!shiftOk && seMin < candStdMin) reasons.push(`shift ends before STD ${cand.std}`);
+    verdictHtml = `<div style="background:#fef2f2;border-bottom:1.5px solid #fca5a5;padding:10px 16px;display:flex;align-items:flex-start;gap:10px">
       <span style="color:#dc2626;font-size:16px;flex-shrink:0">✕</span>
-      <div>
-        <div style="font-size:13px;font-weight:700;color:#991b1b">${tid} cannot service AA${cand.flight}</div>
-        <div style="font-size:12px;color:#b91c1c;margin-top:3px">${reasons.join(' · ')}</div>
-      </div>
-    </div>`;
+      <div><div style="font-size:13px;font-weight:700;color:#991b1b">${tid} cannot service AA${cand.flight}</div>
+      <div style="font-size:12px;color:#b91c1c;margin-top:2px">${reasons.join(' · ')}</div></div></div>`;
   } else if (overCap) {
-    verdictHtml = `<div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:10px">
+    verdictHtml = `<div style="background:#fff7ed;border-bottom:1.5px solid #fed7aa;padding:10px 16px;display:flex;align-items:flex-start;gap:10px">
       <span style="color:#d97706;font-size:16px;flex-shrink:0">⚠</span>
-      <div>
-        <div style="font-size:13px;font-weight:700;color:#9a3412">Timing OK — over cap warning</div>
-        <div style="font-size:12px;color:#c2410c;margin-top:3px">Team is free in time, but this puts ${tid} at ${newFc}/${cap} flights. Coordinator approval recommended.</div>
-      </div>
-    </div>`;
+      <div><div style="font-size:13px;font-weight:700;color:#9a3412">Timing OK — over cap</div>
+      <div style="font-size:12px;color:#c2410c;margin-top:2px">Team free by ${freeAtStr}, but ${tid} goes to ${fc+1}/${cap}. Coordinator approval recommended.</div></div></div>`;
   } else {
-    verdictHtml = `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:10px">
+    verdictHtml = `<div style="background:#f0fdf4;border-bottom:1.5px solid #86efac;padding:10px 16px;display:flex;align-items:flex-start;gap:10px">
       <span style="color:#16a34a;font-size:16px;flex-shrink:0">✓</span>
-      <div>
-        <div style="font-size:13px;font-weight:700;color:#15803d">${tid} can service AA${cand.flight}</div>
-        <div style="font-size:12px;color:#166534;margin-top:3px">Team free by ${freeAtStr > '00:00' ? freeAtStr : 'shift start'}, dispatch needed by ${needsDispStr}. ${newFc}/${cap} flights after move.</div>
-      </div>
-    </div>`;
+      <div><div style="font-size:13px;font-weight:700;color:#15803d">${tid} can service AA${cand.flight}</div>
+      <div style="font-size:12px;color:#166534;margin-top:2px">Free by ${freeAtStr || 'shift start'}, dispatch by ${needsDispStr}. ${fc+1}/${cap} after move.</div></div></div>`;
   }
 
-  // ── Impact detail rows ─────────────────────────────────────────────────
-  const fmtGap = (v) => {
-    if (v === null) return '<span style="color:var(--muted)">—</span>';
-    if (v < 0)  return `<span style="color:#dc2626;font-weight:700">${Math.abs(v)}m conflict</span>`;
-    if (v < 15) return `<span style="color:#d97706;font-weight:700">${v}m tight</span>`;
-    return `<span style="color:#16a34a">${v}m ok</span>`;
-  };
-
-  // Gap from last-before-candidate to candidate dispatch
-  const gapBeforeCand = teamFreeAtCandTime > 0
-    ? Math.round(candLatestDisp - teamFreeAtCandTime) : null;
-
-  // Gap from candidate free time to next op's dispatch
+  // ── Full run table (matches Team Detail view) ───────────────────────────
+  // Merge existing ops + candidate, sorted by std_min
   const merged = [];
   let inserted = false;
   existing.forEach(op => {
@@ -2388,108 +2428,127 @@ function renderMovePreview(tid) {
     merged.push(op);
   });
   if (!inserted) merged.push({...cand, _candidate:true});
-  const candIdx = merged.findIndex(x => x._candidate);
-  const nextOp  = candIdx < merged.length-1 ? merged[candIdx+1] : null;
-  const gapAfterCand = nextOp ? (() => {
-    const nextDisp = nextOp.dispatch_min > 0 ? nextOp.dispatch_min : (_opMin(nextOp) - FINISH_BUF - SVC_TIME - DRV_TIME);
-    return Math.round(nextDisp - candFreeEst);
-  })() : null;
 
-  const impactRows = [
-    ['Cap after move',
-      `<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:${overCap?'#dc2626':atCap?'#d97706':'#16a34a'}">${newFc}/${cap}${overCap?' OVER CAP':atCap?' AT CAP':''}</span>`],
-    ['Team free at dispatch window',
-      timingConflict
-        ? `<span style="color:#dc2626;font-weight:700">Not free until ${freeAtStr} (need by ${needsDispStr})</span>`
-        : `<span style="color:#16a34a">Free by ${freeAtStr||'shift start'}</span>`],
-    ['Gap before candidate', fmtGap(gapBeforeCand)],
-    ...(gapAfterCand !== null ? [['Gap after candidate', fmtGap(gapAfterCand)]] : []),
-    ['Shift covers STD',
-      `<span style="color:${shiftOk?'#16a34a':'#dc2626'};font-weight:700">${shiftOk?'Yes':'No — '+(!shiftStartsInTime?`shift starts ${min2t(ss)}, dispatch by ${needsDispStr}`:`shift ends before ${cand.std}`)}</span>`],
-  ].map(([label, val]) => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #fde68a">
-      <span style="font-size:11px;color:#78350f;font-weight:600">${label}</span>
-      <span style="font-size:12px">${val}</span>
-    </div>`).join('');
-
-  // ── Schedule rows ──────────────────────────────────────────────────────
-  const rows = merged.map(op => {
+  let runNum = 0, lastDispKey = null;
+  const rows = merged.map((op, idx) => {
     const isCand = !!op._candidate;
-    const std    = op.std || (op.std_min > 0 ? min2t(op.std_min) : '—');
-    const disp   = op.dispatch || (op.dispatch_min > 0 ? min2t(op.dispatch_min) : '—');
-    const opFreeMin = op.team_free_min > 0 ? op.team_free_min : null;
-    const freeStr = opFreeMin ? min2t(opFreeMin) : '—';
+    const dispKey = op.dispatch_min || op.dispatch || '';
+    if (dispKey !== lastDispKey) { runNum++; lastDispKey = dispKey; }
+    const sameRun = idx > 0 && (merged[idx-1].dispatch_min || merged[idx-1].dispatch || '') === dispKey;
+
+    // Buffer between runs
+    const prev = idx > 0 ? merged[idx-1] : null;
+    const bufMin = (!prev || sameRun || isCand || prev._candidate) ? null
+      : ((op.dispatch_min||0) - (prev.team_free_min || prev.svc_end_min || 0));
+    const bufCls = bufMin === null ? '' : bufMin < 10 ? '#ef4444' : bufMin < 20 ? '#f59e0b' : '#16a34a';
+    const bufRow = (bufMin !== null)
+      ? `<tr><td colspan="9" style="padding:1px 16px;text-align:center">
+          <span style="font-size:10px;font-weight:700;color:${bufCls};background:${bufCls}18;padding:1px 8px;border-radius:10px">${bufMin}m gap</span>
+         </td></tr>` : '';
+
+    // Run number cell
+    const runNumHtml = sameRun
+      ? `<span style="font-size:10px;color:var(--accent)">·</span>`
+      : `<span style="font-size:11px;font-weight:700;color:var(--muted)">${runNum}</span>`;
 
     if (isCand) {
-      const rowBg = timingConflict ? '#fef2f2' : !shiftOk ? '#fef2f2' : '#fef9c3';
-      const textC = timingConflict ? '#991b1b' : !shiftOk ? '#991b1b' : '#92400e';
-      const badgeHtml = timingConflict
-        ? '<span style="font-size:9px;font-weight:800;background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;padding:2px 6px;border-radius:4px;text-transform:uppercase">CONFLICT</span>'
-        : '<span style="font-size:9px;font-weight:800;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;padding:2px 6px;border-radius:4px;text-transform:uppercase">Adding</span>';
-      return `<tr style="background:${rowBg}">
-        <td style="padding:7px 10px;font-family:var(--mono);font-weight:800;color:${textC}">AA${op.flight}</td>
-        <td style="padding:7px 10px;font-weight:700;color:${textC}">${op.dest||'—'}</td>
-        <td style="padding:7px 10px;font-family:var(--mono);font-weight:700;color:${textC}">${std}</td>
-        <td style="padding:7px 10px;font-family:var(--mono);color:${textC}">${disp}</td>
-        <td style="padding:7px 10px;font-family:var(--mono);color:${textC}">${op.gate||'—'}</td>
-        <td style="padding:7px 10px">${badgeHtml}</td>
+      const badge = timingConflict
+        ? `<span style="font-size:9px;font-weight:800;background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;padding:2px 6px;border-radius:4px">CONFLICT</span>`
+        : `<span style="font-size:9px;font-weight:800;background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:2px 6px;border-radius:4px">ADDING</span>`;
+      const rowBg = timingConflict ? '#fef2f2' : '#f0fdf4';
+      return bufRow + `<tr style="background:${rowBg}">
+        <td style="padding:7px 8px 7px 16px">${runNumHtml}</td>
+        <td style="padding:7px 8px;font-family:var(--mono);font-weight:800;color:${timingConflict?'#991b1b':'#15803d'}">AA${op.flight}</td>
+        <td style="padding:7px 8px;font-weight:700;color:${timingConflict?'#991b1b':'#166534'}">${op.dest||'—'}</td>
+        <td style="padding:7px 8px">${badge}</td>
+        <td style="padding:7px 8px;font-family:var(--mono);font-weight:700;color:${timingConflict?'#991b1b':'#15803d'}">${op.gate||'—'}</td>
+        <td style="padding:7px 8px;color:var(--muted);font-size:11px">${op.equip||'—'}</td>
+        <td style="padding:7px 8px;font-family:var(--mono);font-weight:700;color:${timingConflict?'#991b1b':'#15803d'}">${op.std||'—'}</td>
+        <td style="padding:7px 8px;font-family:var(--mono);color:var(--muted)">—</td>
+        <td style="padding:7px 8px;color:var(--muted)">—</td>
       </tr>`;
     }
 
-    // Highlight ops that conflict with the candidate's dispatch window
-    const opFree = op.team_free_min > 0 ? op.team_free_min
-      : (_opMin(op) + SVC_TIME + DRV_TIME + TURNAROUND);
-    const isConflictOp = opFree > candLatestDisp && _opMin(op) < candStdMin;
-    const rowStyle = isConflictOp ? 'background:#fff7ed' : 'border-bottom:1px solid var(--border2)';
+    // Existing op row
+    const isConflict = (op.team_free_min||0) > candLatestDisp && _opMin(op) < candStdMin;
+    const typeBadge = (op.is_intl && !op.is_precleared) ? '<span class="badge-intl" style="font-size:9px">INTL</span>'
+      : op.is_precleared ? '<span class="badge-pre" style="font-size:9px">PRECLRD</span>'
+      : op.is_ron ? '<span class="badge-ron" style="font-size:9px">RON</span>' : '';
+    const groundBadge = (op.is_short_turn||op.is_tight_turn) ? `<span class="badge-st" style="font-size:9px">${op.is_tight_turn?'TIGHT':'SHORT'}</span>` : '';
+    const rowBg = isConflict ? '#fff7ed' : 'transparent';
+    const opFreeStr = op.team_free_min > 0 ? `<span style="font-size:10px;color:#d97706;font-weight:600">free ${min2t(op.team_free_min)}</span>` : '';
+    const inboundRow = op.inbound_flight ? `<tr style="background:${rowBg}">
+      <td></td><td colspan="8" style="padding:2px 8px 6px 8px;font-size:11px;color:var(--muted)">
+        ↩ AA${op.inbound_flight}${op.inbound_origin?' from '+op.inbound_origin:''} STA ${op.inbound_sta||'—'}${op.ground_mins?' · '+op.ground_mins+'m ground':''}
+      </td></tr>` : '';
 
-    return `<tr style="${rowStyle}">
-      <td style="padding:7px 10px;font-family:var(--mono);font-weight:700;color:${isConflictOp?'#9a3412':'var(--accent)'}">AA${op.flight}</td>
-      <td style="padding:7px 10px;color:var(--text2)">${op.dest||'—'}</td>
-      <td style="padding:7px 10px;font-family:var(--mono);font-weight:600">${std}</td>
-      <td style="padding:7px 10px;font-family:var(--mono);color:var(--muted)">${disp}</td>
-      <td style="padding:7px 10px;color:var(--muted)">${op.gate||'—'}</td>
-      <td style="padding:7px 10px;font-size:10px;color:var(--muted);">${isConflictOp?`<span style="color:#d97706;font-weight:600">free ${freeStr}</span>`:''}</td>
-    </tr>`;
+    return bufRow + `<tr style="background:${rowBg};border-bottom:1px solid var(--border2)">
+      <td style="padding:7px 8px 7px 16px">${runNumHtml}</td>
+      <td style="padding:7px 8px;font-family:var(--mono);font-weight:700;color:var(--accent)">AA${op.flight}</td>
+      <td style="padding:7px 8px;font-weight:600">${op.dest||'—'}</td>
+      <td style="padding:7px 8px">${typeBadge}${groundBadge}</td>
+      <td style="padding:7px 8px;font-family:var(--mono);font-weight:700">${op.gate||'—'}</td>
+      <td style="padding:7px 8px;color:var(--muted);font-size:11px">${op.equip||'—'}</td>
+      <td style="padding:7px 8px;font-family:var(--mono);font-weight:600">${op.std||'—'}</td>
+      <td style="padding:7px 8px;font-family:var(--mono);color:var(--muted)">${op.dispatch||'—'}</td>
+      <td style="padding:7px 8px;font-size:11px;color:var(--muted)">${op.svc_start||'—'}${op.svc_end?' → '+op.svc_end:''} ${isConflict?opFreeStr:''}</td>
+    </tr>${inboundRow}`;
   }).join('');
 
-  const emptyState = document.getElementById('move-preview-empty');
-  if (emptyState) emptyState.style.display = 'none';
-  panel.style.display = 'block';
-  panel.style.height = 'auto';
+  // Team header (matches team detail card style)
+  const ttype = team.team_type || 'FT';
+  const hdrBg = ttype==='OVERNIGHT' ? '#1e293b' : ttype==='PT' ? '#0f172a' : 'var(--accent)';
+  const fc2 = team.flight_count || team.ops || 0;
+  const truckOp = existing.find(o => o.truck_id);
+  const truckStr = truckOp ? ` · Truck ${truckOp.truck_id}` : '';
+
   panel.innerHTML = `
-    <div style="background:#fffbeb;border-bottom:1px solid #fde68a;padding:12px 14px">
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#92400e;margin-bottom:10px">
+    <div style="padding:8px 16px 6px;background:var(--surface2);border-bottom:2px solid var(--border)">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">
         Impact of moving AA${cand.flight} → ${tid}
       </div>
-      ${verdictHtml}
-      ${impactRows}
-    </div>
-    <div style="background:var(--surface)">
-      <div style="padding:8px 10px;background:var(--surface2);border-bottom:1px solid var(--border2)">
-        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">${tid} schedule after this move</span>
+    </div>` + verdictHtml + `
+    <div style="background:#fffbeb;border-bottom:1px solid #fde68a;padding:10px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #fde68a">
+        <span style="font-size:11px;color:#78350f;font-weight:600">Cap after move</span>
+        <span style="font-family:var(--mono);font-size:12px;font-weight:700;color:${overCap?'#dc2626':fc2+1===cap?'#d97706':'#16a34a'}">${fc2+1}/${cap}${overCap?' OVER CAP':fc2+1===cap?' AT CAP':''}</span>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead>
-          <tr style="background:var(--surface2)">
-            <th style="padding:5px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Flight</th>
-            <th style="padding:5px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Dest</th>
-            <th style="padding:5px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">STD</th>
-            <th style="padding:5px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Dispatch</th>
-            <th style="padding:5px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">Gate</th>
-            <th style="padding:5px 10px;border-bottom:1px solid var(--border)"></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
-function filterMoveTeams() {
-  if (window._moveScored) {
-    const onShift_all  = window._moveScored.filter(x => x.onShift && !x.isCurr);
-    const offShift_all = window._moveScored.filter(x => !x.onShift && !x.isCurr);
-    renderMoveTeamList(window._moveScored, onShift_all, offShift_all);
-  }
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #fde68a">
+        <span style="font-size:11px;color:#78350f;font-weight:600">Team free at dispatch window</span>
+        <span style="font-size:12px;font-weight:600;color:${timingConflict?'#dc2626':'#16a34a'}">${timingConflict ? 'Not free until '+freeAtStr+' (need by '+needsDispStr+')' : 'Free by '+(freeAtStr||'shift start')}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #fde68a">
+        <span style="font-size:11px;color:#78350f;font-weight:600">Gap before candidate</span>
+        <span style="font-size:12px">${(()=>{const v=Math.round(candLatestDisp-teamFreeAtCandTime);if(teamFreeAtCandTime===0)return '<span style=\"color:var(--muted)\">—</span>';if(v<0)return '<span style=\"color:#dc2626;font-weight:700\">'+Math.abs(v)+'m conflict</span>';if(v<15)return '<span style=\"color:#d97706;font-weight:700\">'+v+'m tight</span>';return '<span style=\"color:#16a34a\">'+v+'m ok</span>';})()}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0">
+        <span style="font-size:11px;color:#78350f;font-weight:600">Shift covers STD</span>
+        <span style="font-size:12px;color:${shiftOk?'#16a34a':'#dc2626'};font-weight:700">${shiftOk?'Yes':'No — '+(!shiftOk && ss > candLatestDisp ? 'shift starts '+min2t(ss)+', dispatch needed '+needsDispStr : 'shift ends before STD '+cand.std)}</span>
+      </div>
+    </div>
+    <div style="padding:8px 16px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--mono);font-size:13px;font-weight:800;color:var(--accent)">${tid}</span>
+        <span style="font-size:11px;color:var(--muted)">${ttype} · ${team.shift||'—'}${truckStr}</span>
+      </div>
+      <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Schedule after this move</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--surface2);border-bottom:2px solid var(--border)">
+          <th style="padding:5px 8px 5px 16px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;width:30px">#</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Flight</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Dest</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Type</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Gate</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Equip</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">STD</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Dispatch</th>
+          <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Svc Window</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 
@@ -2746,26 +2805,46 @@ function selectDelayFlight(fn) {
          </div>`
       : '';
 
+    // Build a clean timeline of all ops for this team
+    const allOpsHtml = teamOps.map(o => {
+      const isThis   = o.flight === fn;
+      const isBefore = (o.dispatch_min||0) < fDispatch && !isThis;
+      const isAfter  = (o.dispatch_min||0) > fDispatch && !isThis;
+      const rowBg    = isThis   ? '#eff6ff'
+                     : isAfter  ? '#fffbeb' : 'transparent';
+      const flightColor = isThis  ? 'var(--accent)'
+                        : isAfter ? '#92400e' : 'var(--muted)';
+      const badge    = isThis  ? '<span style="font-size:9px;font-weight:700;color:var(--accent);text-transform:uppercase;margin-left:6px">THIS FLIGHT</span>'
+                     : isAfter ? '<span style="font-size:9px;font-weight:700;color:#b45309;text-transform:uppercase;margin-left:6px">AT RISK</span>' : '';
+      return `<div style="display:grid;grid-template-columns:80px 60px 60px 1fr auto;gap:0;padding:7px 16px;background:${rowBg};border-bottom:1px solid var(--border2);align-items:center;font-size:12px">
+        <span style="font-family:var(--mono);font-weight:700;color:${flightColor}">AA${o.flight}${badge}</span>
+        <span style="font-family:var(--mono);color:var(--muted)">${o.dest||'—'}</span>
+        <span style="font-family:var(--mono);font-weight:600">${o.std||'—'}</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Dispatch ${o.dispatch||'—'} · Gate ${o.gate||'—'} · Free ${o.team_free_at||'—'}</span>
+        <span style="font-size:10px;color:var(--muted)">${isBefore?'✓':''}${isAfter?'⚠':''}</span>
+      </div>`;
+    }).join('');
+
+    const atRiskCount = opsAfter.length;
+    const riskBanner  = atRiskCount > 0
+      ? `<div style="padding:8px 16px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:11px;font-weight:600;color:#92400e">⚠ ${atRiskCount} later flight${atRiskCount!==1?'s':''} on ${f.team} may be affected by a delay to this flight</div>`
+      : `<div style="padding:8px 16px;background:#f0fdf4;border-bottom:1px solid #bbf7d0;font-size:11px;font-weight:600;color:var(--ok)">✓ No cascade risk — this is the team's last flight of the day</div>`;
+
     teamCtx.style.display = 'block';
     teamCtx.innerHTML = `
-      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;
-                  letter-spacing:.06em;margin-bottom:6px">
-        ${f.team} Current Schedule
-        <span style="font-weight:400;margin-left:8px">${shift} · ${teamOps.length}/${cap} flights</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--surface2)">
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)">${f.team} · ${shift} · ${teamOps.length}/${cap} flights</span>
+        <span style="font-size:10px;color:var(--muted)">Full team schedule</span>
       </div>
-      ${thisRow}
-      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-        <div>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:3px">COMPLETED / IN PROGRESS</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">${beforeHtml}</div>
-        </div>
-        <div>
-          <div style="font-size:10px;color:var(--warn);font-weight:700;margin-bottom:3px">
-            ⚠ AT RISK (${opsAfter.length} later flight${opsAfter.length!==1?'s':''})
-          </div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">${afterHtml}</div>
-        </div>
-      </div>`;
+      <div style="display:grid;grid-template-columns:80px 60px 60px 1fr auto;padding:5px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">
+        <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Flight</span>
+        <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Dest</span>
+        <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">STD</span>
+        <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Timing</span>
+        <span></span>
+      </div>
+      ${riskBanner}
+      ${allOpsHtml}`;
   } else if (teamCtx) {
     teamCtx.style.display = 'none';
   }
@@ -3722,7 +3801,7 @@ function renderResults(data) {
   // Enable Live Ops buttons for managers/supervisors on any loaded schedule
   const role = currentUser ? currentUser.role : 'agent';
   if (role === 'manager' || role === 'supervisor' || role === 'admin') {
-    ['btn-sick','btn-delay','btn-move','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = false;
     });
@@ -4368,14 +4447,7 @@ function _dispatchBuildModel(data) {
       }
     });
   });
-  // Warning: near-cap or at-cap teams
-  teams.forEach(function(t){
-    if (t.cap && t.flight_count === t.cap) {
-      issues.push({tier:'warning', flight_num:'', team_id: t.team_id,
-        text: t.team_id+' at cap ('+t.flight_count+'/'+t.cap+')',
-        action:'Monitor — no room for additional flights'});
-    }
-  });
+  // At-cap teams shown in KPI strip only — not actionable, excluded from Action Queue
 
   summary.overCap    = issues.filter(function(i){return i.tier==='critical' && i.team_id && !i.flight_num;}).length;
   summary.nearCap    = issues.filter(function(i){return i.tier==='warning';}).length;
@@ -4398,6 +4470,51 @@ function _dbParseMins(s) {
 // Minimum minutes a team needs to be on-shift before they can be dispatched.
 // Load + drive ~ 20 min dock + 10 min drive = 30 min minimum prep from shift start.
 var _DB_MIN_READY_BUFFER = 30;
+
+// ── Driver Alert state ────────────────────────────────────────────────────
+// Maps event_id → { confirmed: bool, by: string, at: string }
+// Persisted in sessionStorage so it survives page refreshes within a session.
+var _driverAlerts = (function() {
+  try { return JSON.parse(sessionStorage.getItem('phl_driver_alerts') || '{}'); }
+  catch(e) { return {}; }
+})();
+
+function _saveDriverAlerts() {
+  try { sessionStorage.setItem('phl_driver_alerts', JSON.stringify(_driverAlerts)); }
+  catch(e) {}
+}
+
+function confirmDriverAlert(eventId) {
+  // Get current user display name from auth state
+  var user = window.currentUser || {};
+  var by   = user.display_name || user.username || 'Dispatcher';
+  var now  = new Date();
+  var at   = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  _driverAlerts[eventId] = { confirmed: true, by: by, at: at };
+  _saveDriverAlerts();
+  // Re-render the specific log item
+  var el = document.querySelector('.db-log-item[data-event-id="'+eventId+'"]');
+  if (el) {
+    var driverRow = el.querySelector('.db-driver-row');
+    if (driverRow) {
+      driverRow.outerHTML = _buildDriverAlertRow(eventId, true, by, at);
+    }
+  }
+}
+
+function _buildDriverAlertRow(eventId, confirmed, by, at) {
+  var eid = _dbEscape(String(eventId));
+  if (confirmed) {
+    var timeBy = (at||'') + (by ? ' · ' + _dbEscape(by) : '');
+    return '<div class="db-driver-row">'
+      + '<span class="db-driver-done">✓ Driver alerted</span>'
+      + '<span style="font-size:11px;color:var(--muted);margin-left:4px">' + timeBy + '</span>'
+      + '</div>';
+  }
+  return '<div class="db-driver-row">'
+    + '<button class="db-driver-confirm" onclick="event.stopPropagation();confirmDriverAlert(&quot;' + eid + '&quot;)">Confirm driver alerted</button>'
+    + '</div>';
+}
 
 function _dbRecommendTeams(flightNum, currentTeam, flightStd, teams) {
   var stdMins = _dbParseMins(flightStd);
@@ -4459,97 +4576,40 @@ function _dbRecommendTeams(flightNum, currentTeam, flightStd, teams) {
 // ── CSS ───────────────────────────────────────────────────────────────────
 function _dbStyles() {
   return '<style>'
-  +'.db-wrap{display:grid;grid-template-columns:320px 1fr 340px;gap:16px;align-items:start}'
-  +'.db-wrap.panel-active{grid-template-columns:320px 0 1fr}'
-  +'#dispatch-team-board{transition:opacity .2s;overflow:hidden}'
-  +'.db-wrap.panel-active #dispatch-team-board{width:0;min-width:0;padding:0;margin:0;border:none;opacity:0;pointer-events:none}'
-  +'.db-col-header{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)}'
-  +'.db-col-log .db-log-item:first-child{margin-top:0}'
-  // Action Queue banner — full-width strip above the 3-col grid
-  +'.db-action-banner{margin-bottom:14px;padding:14px 18px}'
-  +'.db-banner-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}'
-  +'.db-banner-title{font-size:14px;font-weight:800;display:flex;align-items:center;gap:8px}'
-  +'.db-banner-count{background:#dc2626;color:#fff;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px}'
-  +'.db-banner-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}'
-  +'.db-banner-item{border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;cursor:pointer;transition:opacity .15s;border:1.5px solid transparent}'
-  +'.db-banner-item:hover{opacity:.88}'
-  +'.db-banner-item.critical{background:#fef2f2;border-left:4px solid #ef4444;border-color:#fca5a5}'
-  +'.db-banner-item.warning{background:#fff7ed;border-left:4px solid #fb923c;border-color:#fed7aa}'
-  +'.db-banner-item-title{font-size:13px;font-weight:700}'
-  +'.db-banner-item-action{font-size:12px;opacity:.8}'
-  +'.db-banner-item.critical .db-banner-item-title{color:#991b1b}'
-  +'.db-banner-item.critical .db-banner-item-action{color:#b91c1c}'
-  +'.db-banner-item.warning .db-banner-item-title{color:#9a3412}'
-  +'.db-banner-item.warning .db-banner-item-action{color:#c2410c}'
-  +'.db-banner-cta{display:inline-block;margin-top:6px;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:800;background:#dc2626;color:#fff;border:none;cursor:pointer}'
-  +'.db-banner-item.warning .db-banner-cta{background:#ea580c}'
-  +'.db-all-clear{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 16px;color:#15803d;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}'
-  +'.db-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:var(--shadow)}'
-  +'.db-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px}'
-  +'.db-kpi .v{font-size:26px;font-weight:800;line-height:1}.db-kpi .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:6px}'
-  +'.db-log-item{padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s}'
-  +'.db-log-item:hover{border-color:var(--accent)}.db-log-item.active{border-color:var(--accent);background:#f0f6ff;box-shadow:0 0 0 2px rgba(37,99,235,.1)}'
-  +'.db-log-top{display:flex;justify-content:space-between;gap:8px;align-items:center}.db-log-title{font-weight:700;font-size:13px}.db-log-meta{font-size:11px;color:var(--muted);margin-top:3px}'
-  +'.db-pill{display:inline-block;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;cursor:pointer}'
-  +'.db-pill-manual{background:#fef3c7;color:#92400e}.db-pill-auto{background:#dbeafe;color:#1d4ed8}'
-  +'.db-pill-review{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;white-space:nowrap;line-height:1.2}'
-  +'.db-pill-done{background:#dcfce7;color:#15803d;border:1px solid #86efac;white-space:nowrap;line-height:1.2}'
-  +'.db-pill-fh{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;white-space:nowrap;line-height:1.2}'
-  +'.db-child-resolved{color:#15803d}'
-  +'.db-pill-delay{background:#fef3c7;color:#92400e}.db-pill-reasgn{background:#dbeafe;color:#1d4ed8}'
-  +'.db-team{border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px;background:#fff}'
-  +'.db-team.over-cap{border-color:#f87171;background:#fff8f8}'
-  +'.db-team.near-cap{border-color:#fb923c;background:#fffaf7}'
-  +'.db-team-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:8px}'
-  +'.db-team-title{font-weight:800;font-size:13px}.db-team-sub{font-size:11px;color:var(--muted);margin-top:2px}'
-  +'.db-team-cap-ok{color:var(--muted);font-size:12px;font-weight:600}'
-  +'.db-team-cap-warn{color:#9a3412;font-size:12px;font-weight:700}'
-  +'.db-team-cap-crit{color:#991b1b;font-size:12px;font-weight:800}'
-  +'.db-flight-row{display:flex;justify-content:space-between;gap:6px;align-items:center;padding:6px 8px;border-radius:8px;background:var(--surface2);margin-bottom:6px}'
-  +'.db-flight-left{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}'
-  +'.db-flight-chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:2px 7px;border:1px solid var(--border);border-radius:7px;background:#fff;white-space:nowrap}'
-  +'.db-issue-row{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:10px;margin-bottom:8px;cursor:pointer;transition:opacity .15s;border:1px solid transparent}'
-  +'.db-issue-row:hover{opacity:.85;border-color:currentColor}'
-  +'.db-issue-row.critical{background:#fef2f2;color:#991b1b;border-left:3px solid #f87171}'
-  +'.db-issue-row.warning{background:#fff7ed;color:#9a3412;border-left:3px solid #fb923c}'
-  +'.db-issue-row.info{background:#f0f9ff;color:#0369a1;border-left:3px solid #38bdf8}'
-  +'.db-issue-title{font-weight:700;font-size:12px}'
-  +'.db-issue-action{font-size:11px;opacity:.8}'
-  +'.db-section-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 6px 0}'
-  +'.db-decision-header{font-size:20px;font-weight:800;margin-bottom:4px}'
-  +'.db-decision-sub{font-size:12px;color:var(--muted);margin-bottom:12px}'
-  +'.db-reason-box{background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 10px;font-size:12px;color:#991b1b;margin-bottom:14px}'
-  +'.db-rec-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s,background .15s}'
-  +'.db-rec-card:hover{border-color:var(--accent);background:#f0f6ff}'
-  +'.db-rec-card.best{border-color:#16a34a;background:#f0fdf4}'
-  +'.db-rec-title{font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center}'
-  +'.db-rec-why{font-size:11px;color:var(--muted);margin-top:3px}'
-  +'.db-rec-badge{font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;background:#dcfce7;color:#15803d}'
-  +'.db-detail-grid{display:grid;grid-template-columns:90px 1fr;gap:5px 10px;font-size:12px;margin-bottom:14px}'
-  +'.db-detail-label{color:var(--muted)}'
-  +'.db-action-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}'
-  +'.db-btn{padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:700;cursor:pointer;transition:background .15s}'
-  +'.db-btn:hover{background:var(--surface2)}.db-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}.db-btn-primary:hover{opacity:.88}'
-  +'.db-btn-success{background:#16a34a;color:#fff;border-color:#16a34a}.db-btn-success:hover{opacity:.88}'
-  +'.db-btn-danger{background:#fef2f2;color:#991b1b;border-color:#fca5a5}.db-btn-danger:hover{background:#fee2e2}'
-  +'.db-note-area{width:100%;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;resize:vertical;min-height:52px;font-family:inherit;box-sizing:border-box}'
-  +'.db-children{margin-top:8px;padding-left:12px;border-left:2px solid var(--border2)}'
-  +'.db-log-item.resolved-item{opacity:.75;border-color:var(--border)}'
-  +'.db-log-item.resolved-item:hover{opacity:1}'
-  +'.db-child-row{font-size:11px;color:var(--muted);padding:4px 0;display:flex;align-items:center;gap:6px}'
-  +'.db-empty{font-size:12px;color:var(--muted);padding:8px 0}'
-  +'@media(max-width:1200px){.db-wrap{grid-template-columns:1fr}.db-summary{grid-template-columns:repeat(3,1fr)}}'
-  +'</style>';
+
+  /* ─── Design tokens ─── */
+  +':root{--db-px:16px;--db-row:36px;--db-border:#e2e4e8;--db-border2:#eef0f3;--db-surface:#fff;--db-surface2:#f8f9fa;--db-text:#111;--db-muted:#6b7280;--db-red:#c0392b;--db-amber:#92400e;--db-green:#166534;--db-blue:#1d4ed8;--db-mono:"SF Mono","Consolas","Menlo",monospace}'
+  /* ─── Outer frame ─── */
+  +'.db-frame{border:1px solid var(--db-border);background:var(--db-surface)}'
+  /* ─── KPI strip ─── */
+  +'.db-summary{display:grid;grid-template-columns:repeat(6,1fr);border-bottom:1px solid var(--db-border)}'  +'.db-kpi{padding:14px var(--db-px);border-right:1px solid var(--db-border2)}'  +'.db-kpi:last-child{border-right:none}'  +'.db-kpi .v{font-size:28px;font-weight:600;line-height:1;font-family:var(--db-mono);color:var(--db-text)}'  +'.db-kpi .l{font-size:10px;color:var(--db-muted);text-transform:uppercase;letter-spacing:.08em;margin-top:5px;font-weight:500}'
+  /* ─── Action queue ─── */
+  +'.db-action-banner{border-bottom:1px solid var(--db-border)}'  +'.db-banner-header{display:flex;align-items:center;justify-content:space-between;padding:8px var(--db-px);background:var(--db-surface2);border-bottom:1px solid var(--db-border)}'  +'.db-banner-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--db-muted)}'  +'.db-banner-count{font-size:10px;font-weight:700;color:var(--db-red);text-transform:uppercase;letter-spacing:.06em}'  +'.db-banner-table{width:100%;border-collapse:collapse}'  +'.db-banner-row{display:grid;grid-template-columns:24px 1fr auto;align-items:center;padding:10px var(--db-px);border-bottom:1px solid var(--db-border2);cursor:pointer;gap:10px}'  +'.db-banner-row:hover{background:var(--db-surface2)}'  +'.db-banner-row:last-child{border-bottom:none}'  +'.db-banner-accent{width:3px;height:32px;flex-shrink:0;border-radius:2px}'  +'.db-banner-accent.critical{background:var(--db-red)}'  +'.db-banner-body{}'  +'.db-banner-flight{font-family:var(--db-mono);font-size:13px;font-weight:700;color:var(--db-text)}'  +'.db-banner-desc{font-size:11px;color:var(--db-muted);margin-top:2px}'  +'.db-banner-cta{font-size:11px;font-weight:600;color:var(--db-red);white-space:nowrap;text-decoration:none;background:none;border:none;cursor:pointer;padding:0;font-family:inherit}'  +'.db-all-clear{padding:10px var(--db-px);font-size:12px;color:var(--db-green)}'
+  /* ─── Two-column body ─── */
+  +'.db-wrap{display:grid;grid-template-columns:280px 1fr;border-top:none}'
+  /* ─── Column header bar ─── */
+  +'.db-col-header{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--db-muted);padding:8px var(--db-px);background:var(--db-surface2);border-bottom:1px solid var(--db-border);border-top:1px solid var(--db-border)}'
+  /* ─── Log column ─── */
+  +'.db-col-log{border-right:1px solid var(--db-border)}'  +'.db-log-item{padding:10px var(--db-px);border-bottom:1px solid var(--db-border2);cursor:pointer;border-left:3px solid transparent}'  +'.db-log-item:hover{background:var(--db-surface2)}'  +'.db-log-item.active{background:#f0f4ff;border-left-color:var(--db-blue)}'  +'.db-log-item.resolved-item{opacity:.5}'  +'.db-log-item.resolved-item:hover{opacity:.75}'  +'.db-log-top{display:flex;justify-content:space-between;align-items:center;gap:8px}'  +'.db-log-primary{font-family:var(--db-mono);font-size:12px;font-weight:700;color:var(--db-text)}'  +'.db-log-badge{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--db-muted);flex-shrink:0}'  +'.db-log-meta{font-size:10px;color:var(--db-muted);margin-top:3px;font-family:var(--db-mono)}'  +'.db-status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;vertical-align:middle;flex-shrink:0}'
+  /* ─── Log children ─── */
+  +'.db-children{margin-top:6px;padding-left:12px;border-left:2px solid var(--db-border2)}'  +'.db-child-row{font-size:10px;color:var(--db-muted);padding:2px 0;display:flex;align-items:center;gap:6px;font-family:var(--db-mono)}'  +'.db-child-resolved{color:var(--db-green)}'  +'.db-child-action{font-size:10px;font-weight:700;color:var(--db-blue);text-decoration:none;cursor:pointer;background:none;border:none;padding:0;font-family:inherit}'
+  /* ─── Driver alert ─── */
+  +'.db-driver-row{display:flex;align-items:center;gap:8px;padding-top:6px;margin-top:4px;border-top:1px solid var(--db-border2);font-size:10px}'  +'.db-driver-confirm{color:var(--db-blue);text-decoration:underline;cursor:pointer;background:none;border:none;font-family:inherit;font-size:10px;padding:0}'  +'.db-driver-done{color:var(--db-green);font-family:var(--db-mono)}'
+  /* ─── Right detail panel ─── */
+  +'.db-detail-section{padding:16px var(--db-px);border-bottom:1px solid var(--db-border2)}'  +'.db-detail-section:last-child{border-bottom:none}'  +'.db-detail-title{font-size:18px;font-weight:700;color:var(--db-text);margin-bottom:2px}'  +'.db-detail-sub{font-size:11px;color:var(--db-muted);font-family:var(--db-mono)}'  +'.db-detail-grid{display:grid;grid-template-columns:100px 1fr;gap:6px 16px;font-size:12px;margin-top:12px}'  +'.db-detail-label{color:var(--db-muted);font-size:11px}'  +'.db-detail-value{color:var(--db-text);font-family:var(--db-mono);font-size:12px}'  +'.db-section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--db-muted);padding:10px var(--db-px) 6px;display:block}'  +'.db-reason-box{margin:0 var(--db-px) 10px;padding:8px 12px;border-left:3px solid var(--db-red);background:#fef8f8;font-size:11px;color:#7f1d1d}'  +'.db-note-area{width:100%;padding:8px;border:1px solid var(--db-border);font-size:12px;resize:vertical;min-height:60px;font-family:inherit;box-sizing:border-box;color:var(--db-text);background:var(--db-surface)}'  +'.db-note-area:focus{outline:none;border-color:var(--db-blue)}'
+  /* ─── Recommendation cards ─── */
+  +'.db-rec-card{padding:10px var(--db-px);cursor:pointer;border-bottom:1px solid var(--db-border2)}'  +'.db-rec-card:hover{background:var(--db-surface2)}'  +'.db-rec-card.best{border-left:3px solid var(--db-green)}'  +'.db-rec-card:not(.best){border-left:3px solid transparent}'  +'.db-rec-title{font-family:var(--db-mono);font-weight:700;font-size:12px;display:flex;justify-content:space-between;align-items:center;color:var(--db-text)}'  +'.db-rec-card.best .db-rec-title{color:var(--db-green)}'  +'.db-rec-why{font-size:11px;color:var(--db-muted);margin-top:3px}'  +'.db-rec-badge{font-size:9px;font-weight:700;color:var(--db-green);text-transform:uppercase;letter-spacing:.06em}'
+  /* ─── Buttons ─── */
+  +'.db-action-row{display:flex;gap:8px;padding:12px var(--db-px)}'  +'.db-btn{padding:6px 14px;border:1px solid var(--db-border);background:var(--db-surface);font-size:12px;cursor:pointer;font-family:inherit;color:var(--db-text);line-height:1.4}'  +'.db-btn:hover{background:var(--db-surface2)}'  +'.db-btn-primary{background:var(--db-blue);color:#fff;border-color:var(--db-blue)}'  +'.db-btn-primary:hover{opacity:.9}'  +'.db-btn-success{color:var(--db-green);border-color:#d1fae5}'  +'.db-btn-success:hover{background:#f0fdf4}'  +'.db-btn-danger{color:var(--db-red);border-color:#fecaca}'  +'.db-btn-danger:hover{background:#fff5f5}'
+  /* ─── Misc ─── */
+  +'.db-empty{font-size:12px;color:var(--db-muted);padding:24px var(--db-px)}'  +'.db-pill{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}'  +'.db-pill-review{color:var(--db-red)}'  +'.db-pill-done,.db-pill-alerted{color:var(--db-green)}'  +'.db-pill-fh,.db-pill-alert{color:var(--db-amber)}'  +'.db-pill-manual,.db-pill-auto{color:var(--db-muted)}'  +'@media(max-width:1100px){.db-wrap{grid-template-columns:1fr}.db-summary{grid-template-columns:repeat(3,1fr)}}'  +'</style>';
 }
 
-// ── Event log renderer ───────────────────────────────────────────────────
 function _dbRenderEventCards(events) {
-  if (!events.length) return '<div class="db-empty">No live actions logged yet.</div>';
+  if (!events || !events.length) {
+    return '<div class="db-empty">No dispatch events yet. Live ops actions will appear here.</div>';
+  }
   return events.map(function(e, i) {
-    // ── Compute effective status from children ───────────────────────────
-    // Parent is 'resolved' when all manual_required children are resolved.
-    // Parent stays 'needs_review' while any manual_required child is pending.
-    // Parent is 'applied' when auto-only (no manual_required children).
     var hasManualChildren = (e.children||[]).some(function(c){ return c.type==='manual_required'; });
     var effectiveStatus = e.status;
     if (hasManualChildren) {
@@ -4559,78 +4619,63 @@ function _dbRenderEventCards(events) {
       effectiveStatus = anyPending ? 'needs_review' : 'resolved';
     }
 
-    var modePillCls = e.mode==='manual' ? 'db-pill-manual' : 'db-pill-auto';
-    var statusBadge = '';
+    // Status indicator — plain text, no pill background
+    var statusText = '';
     if (effectiveStatus === 'needs_review') {
-      statusBadge = ' <span class="db-pill db-pill-review" onclick="event.stopPropagation();dbOpenReviewDecision(\''+_dbEscape(e.flight_num)+'\',\''+_dbEscape(e.from_team)+'\',\''+_dbEscape(e.id)+'\')">⚠ Review</span>';
+      statusText = ' <span class="db-pill db-pill-review" onclick="event.stopPropagation();dbOpenReviewDecision(&quot;'+_dbEscape(e.flight_num)+'&quot;,&quot;'+_dbEscape(e.from_team)+'&quot;,&quot;'+_dbEscape(e.id)+'&quot;)">Assign &rarr;</span>';
     } else if (effectiveStatus === 'resolved') {
-      statusBadge = ' <span class="db-pill db-pill-done">✓ Done</span>';
+      statusText = ' <span class="db-pill db-pill-done">✓</span>';
     } else {
-      // All other completed entries (manual_reassign, gate_change, sick_call etc.)
-      // are 'applied' — show a clear Done badge so nothing looks ambiguous
-      statusBadge = ' <span class="db-pill db-pill-done">✓ Done</span>';
+      statusText = ' <span class="db-pill db-pill-done">✓</span>';
     }
 
     var meta = [
-      e.from_team ? ('from '+e.from_team) : '',
+      e.from_team ? e.from_team : '',
       e.to_team && e.to_team !== e.from_team ? ('→ '+e.to_team) : '',
     ].filter(Boolean).join(' ');
 
-    // ── Child rows ───────────────────────────────────────────────────────
+    // Status dot color
+    var dotColor = effectiveStatus === 'needs_review' ? '#dc2626'
+      : effectiveStatus === 'resolved' ? 'var(--ok)' : 'var(--muted)';
+    var statusDot = '<span class="db-status-dot" style="background:'+dotColor+'"></span>';
+
+    // Children
     var kids = '';
     if (e.children && e.children.length) {
       kids = '<div class="db-children">' + e.children.map(function(c) {
-        var childLine = '';
         if (c.type === 'manual_required') {
           if (c.status === 'resolved') {
-            // Show what was done, who did it, when
-            childLine = '<div class="db-child-row db-child-resolved">'
-              + '<span style="font-size:10px">✓</span>'
-              + (c.flight ? ' '+_dbEscape(c.flight) : '')
-              + ' · Moved to ' + _dbEscape(c.resolved_by || 'dispatcher')
-              + (c.resolved_at ? ' · ' + _dbEscape(c.resolved_at) : '')
-              + '</div>';
-          } else {
-            // Still outstanding — clickable REVIEW pill
-            // Show the cascade context: this flight needs reassignment because
-            // it was bumped from its team by the parent delay, not a standalone issue.
-            var childReason = c.reason || 'No clean auto-fix available';
-            // Replace the generic backend reason with a more actionable label
-            if (childReason === 'No clean under-cap auto-fix available') {
-              childReason = 'needs reassignment — no under-cap team available';
-            }
-            childLine = '<div class="db-child-row">'
-              + (c.flight ? '<strong>'+_dbEscape(c.flight)+'</strong> · ' : '')
-              + _dbEscape(childReason)
-              + ' <span class="db-pill db-pill-review" onclick="event.stopPropagation();dbOpenReviewDecision(\''+_dbEscape(c.flight_num)+'\',\''+_dbEscape(c.from_team||e.from_team)+'\',\''+_dbEscape(c.id)+'\')">⚠ Review</span>'
-              + '</div>';
+            return '<div class="db-child-row db-child-resolved">✓ '+(c.flight||'')+(c.resolved_by?' · '+c.resolved_by:'')+(c.resolved_at?' '+c.resolved_at:'')+'</div>';
           }
+          var childReason = c.reason === 'No clean under-cap auto-fix available' ? 'needs reassignment' : (c.reason||'needs reassignment');
+          return '<div class="db-child-row"><strong>'+(c.flight||'')+'</strong> · '+_dbEscape(childReason)+' <button class="db-child-action" onclick="event.stopPropagation();dbOpenReviewDecision(&quot;'+_dbEscape(c.flight_num)+'&quot;,&quot;'+_dbEscape(c.from_team||e.from_team)+'&quot;,&quot;'+_dbEscape(c.id)+'&quot;)">Assign &rarr;</button></div>';
         } else if (c.type === 'auto_reassign') {
-          childLine = '<div class="db-child-row">'
-            + (c.flight ? _dbEscape(c.flight)+' · ' : '')
-            + _dbEscape(c.reason || 'Moved to under-cap feasible team after delay impact')
-            + (c.to_team ? ' → '+_dbEscape(c.to_team) : '')
-            + (c.is_fh_dispatch ? ' <span class="db-pill db-pill-fh">FH dispatch</span>' : '')
-            + '</div>';
-        } else {
-          childLine = '<div class="db-child-row">'
-            + (c.flight ? _dbEscape(c.flight)+' · ' : '')
-            + _dbEscape(c.reason || c.title || '')
-            + '</div>';
+          return '<div class="db-child-row">'+(c.flight||'')+' → '+_dbEscape(c.to_team||'')+(c.is_fh_dispatch?' <span class="db-pill db-pill-fh">FH</span>':'')+'</div>';
         }
-        return childLine;
+        return '<div class="db-child-row">'+(c.flight||'')+' · '+_dbEscape(c.reason||c.title||'')+'</div>';
       }).join('') + '</div>';
     }
 
-    return '<div class="db-log-item'+(i===0?' active':'')+(effectiveStatus==='resolved'?' resolved-item':'')+'" data-event-id="'+_dbEscape(e.id)+'" onclick="selectDispatchEvent(\''+_dbEscape(e.id)+'\')"><div class="db-log-top"><div class="db-log-title">'+_dbEscape(e.title)+statusBadge+'</div>'
-      +'<span class="db-pill '+modePillCls+'">'+_dbEscape(e.mode)+'</span></div>'
-      +'<div class="db-log-meta">'+_dbEscape(e.timestamp||'')+(e.flight ? ' · '+_dbEscape(e.flight) : '')+(meta ? ' · '+_dbEscape(meta) : '')+'</div>'
-      +kids+'</div>';
+    // Driver alert row
+    var alertTypes = ['reassign','manual_reassign','auto_reassign','gate_change','delay'];
+    var needsAlert = alertTypes.indexOf(e.type) >= 0 && (e.to_team || e.from_team || e.flight);
+    var alertState = _driverAlerts[e.id] || {};
+    var driverRow = needsAlert ? _buildDriverAlertRow(e.id, alertState.confirmed, alertState.by, alertState.at) : '';
+
+
+    var primaryLine = [e.flight, meta].filter(Boolean).join(' · ') || e.title;
+    var modeLabel = (e.mode||'auto').toUpperCase();
+    return '<div class="db-log-item'+(i===0?' active':'')+''+(effectiveStatus==='resolved'?' resolved-item':'')+'" data-event-id="'+_dbEscape(e.id)+'" onclick="selectDispatchEvent(&quot;'+_dbEscape(e.id)+'&quot;)">'
+      +'<div class="db-log-top">'
+      +'<span class="db-log-primary">'+statusDot+_dbEscape(primaryLine)+statusText+'</span>'
+      +'<span class="db-log-badge">'+modeLabel+'</span>'
+      +'</div>'
+      +'<div class="db-log-meta">'+_dbEscape(e.timestamp||'')+(e.title&&e.title!==primaryLine?' · '+_dbEscape(e.title):'')+'</div>'
+      +kids
+      +driverRow
+      +'</div>';
   }).join('');
 }
-
-
-// ── Team board renderer ──────────────────────────────────────────────────
 function _dbRenderTeamCards(teams) {
   if (!teams.length) return '<div class="db-empty">No team assignments to show.</div>';
   return teams.map(function(t) {
@@ -4668,91 +4713,39 @@ function _dbRenderTeamCards(teams) {
 // All-clear state shows a green confirmation so the dispatcher knows they're done.
 function _dbRenderIssuesBanner(issues, model) {
   var critical = issues.filter(function(i){ return i.tier==='critical'; });
-  var warning  = issues.filter(function(i){ return i.tier==='warning'; });
-  var total    = critical.length + warning.length;
+  var total    = critical.length;
 
-  var headerHtml = '<div class="db-banner-header">'
-    + '<div class="db-banner-title">'
-    + (critical.length > 0 ? '⚠ Action Queue' : 'Action Queue')
-    + (critical.length > 0 ? '<span class="db-banner-count">'+critical.length+' critical</span>' : '')
-    + '</div>'
-    + '<span style="font-size:11px;color:var(--muted)">'
-    + (total > 0 ? total+' item'+(total!==1?'s':'')+' need attention' : 'All clear')
-    + '</span>'
+  var header = '<div class="db-banner-header">'
+    + '<span class="db-banner-title">Action Queue</span>'
+    + (total > 0
+        ? '<span class="db-banner-count">'+total+' critical item'+(total!==1?'s':'')+' need attention</span>'
+        : '<span style="font-size:10px;color:var(--db-green);font-weight:600;text-transform:uppercase;letter-spacing:.06em">All clear</span>')
     + '</div>';
 
   if (total === 0) {
-    return headerHtml
-      + '<div class="db-all-clear"><span style="font-size:16px">✓</span> All flights assigned and accounted for. No action required.</div>';
+    return header + '<div class="db-all-clear">&#10003; No action required. All flights assigned.</div>';
   }
 
-  var itemsHtml = '<div class="db-banner-grid">';
-
-  critical.forEach(function(iss) {
-    var fn = iss.flight_num || '';
+  var rows = critical.map(function(iss) {
+    var fn  = iss.flight_num || '';
     var tid = iss.team_id || '';
     var eid = iss.event_id || '';
     var onclick = fn
-      ? 'dbOpenReviewDecision(\''+_dbEscape(fn)+'\',\''+_dbEscape(iss.from_team||'')+'\',\''+_dbEscape(eid)+'\')'
-      : tid ? 'dbOpenTeamDecision(\''+_dbEscape(tid)+'\')' : '';
-    itemsHtml += '<div class="db-banner-item critical" onclick="'+onclick+'">'
-      + '<div class="db-banner-item-title">'+_dbEscape(iss.text)+'</div>'
-      + '<div class="db-banner-item-action">→ '+_dbEscape(iss.action)+'</div>'
-      + (onclick ? '<button class="db-banner-cta" onclick="event.stopPropagation();'+onclick+'">Fix Now →</button>' : '')
+      ? 'dbOpenReviewDecision(&quot;'+_dbEscape(fn)+'&quot;,&quot;'+_dbEscape(iss.from_team||'')+'&quot;,&quot;'+_dbEscape(eid)+'&quot;)'
+      : tid ? 'dbOpenTeamDecision(&quot;'+_dbEscape(tid)+'&quot;)' : '';
+    var label = fn ? 'AA'+_dbEscape(fn) : _dbEscape(iss.text);
+    var desc  = _dbEscape(iss.action||'');
+    return '<div class="db-banner-row" onclick="'+onclick+'">'
+      + '<div class="db-banner-accent critical"></div>'
+      + '<div class="db-banner-body">'
+      + '<div class="db-banner-flight">'+label+'</div>'
+      + (desc ? '<div class="db-banner-desc">'+desc+'</div>' : '')
+      + '</div>'
+      + (onclick ? '<button class="db-banner-cta" onclick="event.stopPropagation();'+onclick+'">Assign →</button>' : '')
       + '</div>';
-  });
+  }).join('');
 
-  warning.slice(0, 4).forEach(function(iss) {
-    var tid = iss.team_id || '';
-    var onclick = tid ? 'dbOpenTeamDecision(\''+_dbEscape(tid)+'\')' : '';
-    itemsHtml += '<div class="db-banner-item warning"'+(onclick?' onclick="'+onclick+'"':'')+'>'
-      + '<div class="db-banner-item-title">'+_dbEscape(iss.text)+'</div>'
-      + '<div class="db-banner-item-action">'+_dbEscape(iss.action)+'</div>'
-      + '</div>';
-  });
-
-  if (warning.length > 4) {
-    itemsHtml += '<div class="db-banner-item warning" style="justify-content:center;align-items:center">'
-      + '<div class="db-banner-item-title" style="text-align:center">+' + (warning.length-4) + ' more at-cap teams</div>'
-      + '<div class="db-banner-item-action" style="text-align:center">Monitor — no immediate action needed</div>'
-      + '</div>';
-  }
-
-  itemsHtml += '</div>';
-  return headerHtml + itemsHtml;
-}
-
-// ── Issues panel renderer (kept for legacy callers) ───────────────────────
-function _dbRenderIssues(issues) {
-  if (!issues.length) return '<div class="db-empty">No active issues.</div>';
-  var critical = issues.filter(function(i){return i.tier==='critical';});
-  var warning  = issues.filter(function(i){return i.tier==='warning';});
-  var html = '';
-  if (critical.length) {
-    html += '<div class="db-section-label">⚠ Critical — Act Now</div>';
-    html += critical.map(function(iss) {
-      var fn = iss.flight_num || '';
-      var tid = iss.team_id || '';
-      var eid = iss.event_id || '';
-      var onclick = fn
-        ? 'dbOpenReviewDecision(\''+_dbEscape(fn)+'\',\''+_dbEscape(iss.from_team||'')+'\',\''+_dbEscape(eid)+'\')'
-        : tid ? 'dbOpenTeamDecision(\''+_dbEscape(tid)+'\')' : '';
-      return '<div class="db-issue-row critical" onclick="'+onclick+'">'
-        +'<div class="db-issue-title">'+_dbEscape(iss.text)+'</div>'
-        +'<div class="db-issue-action">→ '+_dbEscape(iss.action)+'</div>'
-        +'</div>';
-    }).join('');
-  }
-  if (warning.length) {
-    html += '<div class="db-section-label">Monitor</div>';
-    html += warning.map(function(iss) {
-      return '<div class="db-issue-row warning">'
-        +'<div class="db-issue-title">'+_dbEscape(iss.text)+'</div>'
-        +'<div class="db-issue-action">'+_dbEscape(iss.action)+'</div>'
-        +'</div>';
-    }).join('');
-  }
-  return html;
+  return header + rows;
 }
 
 // ── Decision panel: review/manual-fix flight ─────────────────────────────
@@ -4877,28 +4870,32 @@ function _dbRenderDecisionPanel(flightNum, fromTeam, eventId, model) {
 }
 // ── Decision panel: standard event detail ────────────────────────────────
 function _dbRenderDetailPanel(evt, model) {
-  if (!evt) return '<div class="db-empty">Select an event or issue to view details.</div>';
-  var sid = sessionId || (fullScheduleData&&fullScheduleData.session_id) || (scheduleData&&scheduleData.session_id) || '';
-  return '<button onclick="_dbDeactivatePanel()" style="display:flex;align-items:center;gap:5px;background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;padding:0 0 12px;font-family:var(--sans)">← Back to Team Board</button>'
-    +'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Event Detail</div>'
-    +'<div style="font-size:18px;font-weight:800;margin-bottom:3px">'+_dbEscape(evt.title)+'</div>'
-    +'<div style="color:var(--muted);font-size:11px;margin-bottom:12px">'+_dbEscape(evt.timestamp||'')+' · '+_dbEscape(evt.mode||'')+'</div>'
-    +'<div class="db-detail-grid">'
-    +'<div class="db-detail-label">Flight</div><div>'+_dbEscape(evt.flight||'—')+'</div>'
-    +'<div class="db-detail-label">From</div><div>'+_dbEscape(evt.from_team||'—')+'</div>'
-    +'<div class="db-detail-label">To</div><div>'+_dbEscape(evt.to_team||evt.from_team||'—')+'</div>'
-    +'<div class="db-detail-label">Old STD</div><div>'+_dbEscape(evt.old_std||'—')+'</div>'
-    +'<div class="db-detail-label">New STD</div><div>'+_dbEscape(evt.new_std||evt.old_std||'—')+'</div>'
-    +'<div class="db-detail-label">Gate</div><div>'+_dbEscape(evt.old_gate||'—')+'</div>'
-    +'<div class="db-detail-label">Reason</div><div style="font-size:11px">'+_dbEscape(evt.reason||'—')+'</div>'
-    +'</div>'
-    +'<div class="db-section-label">Note</div>'
-    +'<textarea id="db-note-input" class="db-note-area" placeholder="Add a note…">'+_dbEscape(evt.note||'')+'</textarea>'
-    +'<div class="db-action-row">'
-    +'<button class="db-btn db-btn-primary" onclick="dbSaveNote(\''+_dbEscape(evt.id)+'\')">Save Note</button>'
-    +(evt.flight_num ? '<button class="db-btn" onclick="dbOpenReviewDecision(\''+_dbEscape(evt.flight_num)+'\',\''+_dbEscape(evt.from_team)+'\',\''+_dbEscape(evt.id)+'\')">Find Team</button>' : '')
-    +'<button class="db-btn db-btn-danger" onclick="dbUndo()">Undo Last</button>'
-    +'</div>';
+  if (!evt) return '<div class="db-empty">Select an event from the log to view details.</div>';
+  var eid = _dbEscape(evt.id||'');
+  var efn = _dbEscape(evt.flight_num||'');
+  var eft = _dbEscape(evt.from_team||'');
+  return '<div class="db-detail-section">'
+    + '<div class="db-detail-title">'+_dbEscape(evt.title)+'</div>'
+    + '<div class="db-detail-sub">'+_dbEscape(evt.timestamp||'')+' · '+_dbEscape(evt.mode||'')+'</div>'
+    + '<div class="db-detail-grid">'
+    + '<div class="db-detail-label">Flight</div><div class="db-detail-value">'+_dbEscape(evt.flight||'—')+'</div>'
+    + '<div class="db-detail-label">From</div><div class="db-detail-value">'+_dbEscape(evt.from_team||'—')+'</div>'
+    + '<div class="db-detail-label">To</div><div class="db-detail-value">'+_dbEscape(evt.to_team||evt.from_team||'—')+'</div>'
+    + '<div class="db-detail-label">Old STD</div><div class="db-detail-value">'+_dbEscape(evt.old_std||'—')+'</div>'
+    + '<div class="db-detail-label">New STD</div><div class="db-detail-value">'+_dbEscape(evt.new_std||evt.old_std||'—')+'</div>'
+    + '<div class="db-detail-label">Gate</div><div class="db-detail-value">'+_dbEscape(evt.old_gate||'—')+'</div>'
+    + '<div class="db-detail-label">Reason</div><div class="db-detail-value">'+_dbEscape(evt.reason||'—')+'</div>'
+    + '</div>'
+    + '</div>'
+    + '<div class="db-detail-section">'
+    + '<span class="db-section-label">Note</span>'
+    + '<textarea id="db-note-input" class="db-note-area" placeholder="Add a note…">'+_dbEscape(evt.note||'')+'</textarea>'
+    + '</div>'
+    + '<div class="db-action-row">'
+    + '<button class="db-btn db-btn-primary" onclick="dbSaveNote(&quot;'+eid+'&quot;)">Save Note</button>'
+    + (evt.flight_num ? '<button class="db-btn" onclick="dbOpenReviewDecision(&quot;'+efn+'&quot;,&quot;'+eft+'&quot;,&quot;'+eid+'&quot;)">Find Team</button>' : '')
+    + '<button class="db-btn db-btn-danger" onclick="dbUndo()">Undo Last</button>'
+    + '</div>';
 }
 
 // ── Main renderer ─────────────────────────────────────────────────────────
@@ -4917,7 +4914,7 @@ function renderDispatchBoard(data) {
     [s.manual||0,    'Manual',       ''],
     [s.auto||0,      'Auto',         ''],
   ].map(function(k) {
-    return '<div class="db-card db-kpi"><div class="v" style="'+k[2]+'">'+k[0]+'</div><div class="l">'+k[1]+'</div></div>';
+    return '<div class="db-kpi"><div class="v" style="'+k[2]+'">'+k[0]+'</div><div class="l">'+k[1]+'</div></div>';
   }).join('');
 
   var firstDetail = model.events.length
@@ -4927,25 +4924,17 @@ function renderDispatchBoard(data) {
   var hasIssues = model.issues.some(function(i){return i.tier==='critical';});
 
   root.innerHTML = _dbStyles()
-    // ── Top: KPI strip ────────────────────────────────────────────────
+    +'<div class="db-frame">'
     +'<div class="db-summary">'+kpis+'</div>'
-    // ── Action Queue banner — full width, above the fold when issues exist
-    +(model.issues.length ? '<div class="db-action-banner db-card">'+_dbRenderIssuesBanner(model.issues, model)+'</div>' : '')
-    // ── Main 3-column grid ────────────────────────────────────────────
+    +(model.issues.length ? '<div class="db-action-banner">'+_dbRenderIssuesBanner(model.issues, model)+'</div>' : '')
     +'<div class="db-wrap">'
-    // Col 1: Dispatch Log
-    +'<div class="db-card db-col-log" style="max-height:80vh;overflow-y:auto">'
+    +'<div class="db-col-log" style="max-height:78vh;overflow-y:auto">'
     +'<div class="db-col-header">Dispatch Log</div>'
     +_dbRenderEventCards(model.events)
     +'</div>'
-    // Col 2: Team / Run Board only (Action Queue promoted above)
-    +'<div class="db-card" id="dispatch-team-board" style="max-height:80vh;overflow-y:auto">'
-    +'<div class="db-col-header">Team / Run Board</div>'
-    +_dbRenderTeamCards(model.teams)
-    +'</div>'
-    // Col 3: Event Detail panel
-    +'<div class="db-card" id="dispatch-detail-panel" style="max-height:80vh;overflow-y:auto">'
+    +'<div id="dispatch-detail-panel" style="max-height:78vh;overflow-y:auto;border-left:1px solid var(--db-border)">'
     +firstDetail
+    +'</div>'
     +'</div>'
     +'</div>';
 }
@@ -4983,14 +4972,8 @@ window._openReassignForFlight = function(flightNum) {
 };
 
 // ── Dispatch board layout helpers — collapse/restore team board ──────────
-function _dbActivatePanel() {
-  var wrap = document.querySelector('.db-wrap');
-  if (wrap) wrap.classList.add('panel-active');
-}
+function _dbActivatePanel() { /* no-op: 2-column layout, detail panel always visible */ }
 function _dbDeactivatePanel() {
-  var wrap = document.querySelector('.db-wrap');
-  if (wrap) wrap.classList.remove('panel-active');
-  // Restore default empty detail
   var model = window.__dispatchModel;
   var panel = document.getElementById('dispatch-detail-panel');
   if (panel && model) {
@@ -5801,6 +5784,13 @@ function applyRoleUI(role) {
 }
 
 // ── Check saved session on load ────────────────────────────────────────────
+// Fetch server config once on load — determines if schedule generation is enabled
+window._serverConfig = { schedule_generation: true }; // safe default
+fetch('/api/config')
+  .then(function(r){ return r.json(); })
+  .then(function(cfg){ window._serverConfig = cfg; })
+  .catch(function(){});  // silently fail — default allows generation
+
 function checkAuthOnLoad() {
   var token = localStorage.getItem(AUTH_KEY);
   if (!token) { showLoginScreen(); return; }
@@ -5956,14 +5946,36 @@ function bootForRole(user) {
   var role  = user.role;
   var today = new Date().toISOString().slice(0,10);
 
-  // Show admin button via body class (CSS-driven, belt-and-suspenders)
-  document.body.classList.toggle('manager-mode', role === 'manager');
+  // Check if schedule generation is disabled on this server (Render ops-only mode)
+  var canGenerate = !window._serverConfig || window._serverConfig.schedule_generation !== false;
 
-  if (role === 'manager') {
-    // Manager: show sidebar with generate panel, also load today if exists
+  // Show admin button via body class (CSS-driven, belt-and-suspenders)
+  document.body.classList.toggle('manager-mode', role === 'manager' && canGenerate);
+
+  if (role === 'manager' && canGenerate) {
+    // Manager on local Mac: full access including schedule generation
     var shift = window._currentShift || 'morning';
     loadSavedSchedule(today, shift);
     // Populate date picker with schedules that exist
+    loadScheduleDates();
+    return;
+  }
+
+  if (role === 'manager' && !canGenerate) {
+    // Manager on Render: ops-only mode — load schedule but hide generate sidebar
+    var sidebar = document.getElementById('sidebar');
+    if (sidebar) sidebar.style.display = 'none';
+    // Show a banner so it's clear this is ops-only mode
+    var banner = document.createElement('div');
+    banner.id = 'ops-only-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#1a2235;border-bottom:2px solid #e8a020;padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px;color:#8899bb;';
+    banner.innerHTML = '<span style="color:#e8a020;font-weight:700;font-family:monospace;letter-spacing:.06em">OPS MODE</span> Schedule generation is disabled on this server. Use your local Mac to generate schedules. <span id="ops-banner-date" style="margin-left:auto;font-family:monospace;font-size:11px;color:#4a5c7a"></span>';
+    document.body.prepend(banner);
+    // Push main content down to clear banner
+    var mainEl = document.querySelector('main') || document.getElementById('main');
+    if (mainEl) mainEl.style.paddingTop = (parseInt(mainEl.style.paddingTop||0) + 40) + 'px';
+    var shift = window._currentShift || 'combined';
+    loadSavedSchedule(today, shift);
     loadScheduleDates();
     return;
   }
@@ -7195,6 +7207,15 @@ var _origApplySession = applySession;
 applySession = function(user) {
   _origApplySession(user);
   bootForRole(user);
+  // Hide "+ New Schedule" button in ops-only mode
+  var canGenerate = !window._serverConfig || window._serverConfig.schedule_generation !== false;
+  if (!canGenerate) {
+    var btnNew = document.querySelector('.btn-new');
+    if (btnNew) btnNew.style.display = 'none';
+    // Also hide the collapsed sidebar bar entirely
+    var newBar = document.querySelector('.new-schedule-bar');
+    if (newBar) newBar.style.display = 'none';
+  }
 };
 </script>
 
