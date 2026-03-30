@@ -5898,24 +5898,49 @@ function checkAuthOnLoad() {
   var token = localStorage.getItem(AUTH_KEY);
   if (!token) { showLoginScreen(); return; }
 
-  fetch('/api/auth/verify', {
-    method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':token},
-    body: JSON.stringify({auth_token: token})
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(data){
-    if (data.valid) {
-      hideLoginScreen();
-      applySession(data);
-    } else {
+  // In ops mode (Render): always require explicit sign-in — never auto-bypass
+  // Wait for config to be fetched first, then decide
+  var configPromise = window._serverConfigReady || Promise.resolve(window._serverConfig);
+  configPromise.then(function() {
+    var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
+    if (opsOnly) {
+      // Show login screen — but pre-fill username so user just needs password
+      showLoginScreen();
+      fetch('/api/auth/verify', {
+        method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':token},
+        body: JSON.stringify({auth_token: token})
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (data.valid && data.username) {
+          var uEl = document.getElementById('login-username');
+          if (uEl && !uEl.value) uEl.value = data.username;
+        } else {
+          localStorage.removeItem(AUTH_KEY);
+        }
+      }).catch(function(){ localStorage.removeItem(AUTH_KEY); });
+      return;
+    }
+
+    // Mac / local: auto-login with stored token as before
+    fetch('/api/auth/verify', {
+      method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':token},
+      body: JSON.stringify({auth_token: token})
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (data.valid) {
+        hideLoginScreen();
+        applySession(data);
+      } else {
+        localStorage.removeItem(AUTH_KEY);
+        showLoginScreen();
+      }
+    })
+    .catch(function(){
       localStorage.removeItem(AUTH_KEY);
       showLoginScreen();
-    }
-  })
-  .catch(function(){
-    // Server error on verify — show login silently (don't show connection error)
-    localStorage.removeItem(AUTH_KEY);
-    showLoginScreen();
+    });
   });
 }
 
@@ -6988,9 +7013,20 @@ function applyRunEdit() {
     btn.disabled = false; btn.textContent = 'Apply Changes';
     if (data.error) { alert('Error: ' + data.error); return; }
 
-    setScheduleFromServer(data.result);
-    renderResults(data.result);
-    populateLiveOpsDropdowns && populateLiveOpsDropdowns(data.result);
+    // Guard: if result is missing or empty, reload from sessions rather than blanking
+    var result = data.result;
+    if (!result || (!result.assignments && !result.team_summary)) {
+      console.warn('[applyRunEdit] No result in response — reloading from sessions');
+      closeRunEditor();
+      var reloadDate = window._scheduleDate || new Date().toISOString().slice(0,10);
+      loadSavedSchedule(reloadDate, 'combined');
+      showToast && showToast('Run updated — reloading schedule…', 2000);
+      return;
+    }
+
+    setScheduleFromServer(result);
+    renderResults(result);
+    populateLiveOpsDropdowns && populateLiveOpsDropdowns(result);
     closeRunEditor();
 
     if (data.violations && data.violations.length) {
