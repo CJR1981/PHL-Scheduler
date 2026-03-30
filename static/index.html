@@ -744,7 +744,8 @@ body.authenticated #login-screen { display: none !important; }
   <div class="logo-dot"></div>
   <span class="logo-name">PHL Catering Scheduler</span>
   <span class="logo-sub">American Airlines · Philadelphia International</span>
-  <span id="build-badge" style="margin-left:14px;padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted)">Build v2.6.6-dispatchboard-sessionfix</span>
+  <span id="schedule-date-badge" style="margin-left:8px;padding:5px 12px;border:1px solid #e8a020;border-radius:999px;background:rgba(232,160,32,0.08);font-size:11px;font-weight:700;color:#e8a020;display:none"></span>
+  <span id="build-badge" style="margin-left:14px;padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted)">V4.0.0 · Ops Mode</span>
 
   <!-- User menu — hidden until authenticated -->
   <div id="user-bar" style="margin-left:auto;display:none;align-items:center;gap:8px">
@@ -1787,6 +1788,14 @@ function updateStatusBadge(status) {
   const badge = document.getElementById('schedule-status-badge');
   const confirmBtn = document.getElementById('btn-confirm-schedule');
   if (!badge) return;
+
+  // Ops-only mode (Render): never show confirm button or draft/confirmed badge
+  const opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
+  if (opsOnly) {
+    badge.style.display = 'none';
+    if (confirmBtn) confirmBtn.style.display = 'none';
+    return;
+  }
 
   const role = currentUser ? currentUser.role : '';
   const canConfirm = ['manager','admin','supervisor'].includes(role);
@@ -3837,7 +3846,29 @@ function renderStats(s) {
     ? `Balanced (${s.balance_iterations} pass${s.balance_iterations!==1?'es':''})`
     : 'Balance pass 0';
   const bar = document.getElementById('stats-bar');
-  bar.innerHTML = `
+  const opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
+
+  // Update prominent date badge in header
+  const schedDate = window._scheduleDate || '';
+  const schedDay  = s.day_of_week || window._scheduleDay || '';
+  const dateBadge = document.getElementById('schedule-date-badge');
+  if (dateBadge && schedDate) {
+    dateBadge.textContent = schedDate + (schedDay ? '  ·  ' + schedDay : '');
+    dateBadge.style.display = 'inline-block';
+  }
+
+  // In ops mode: hide quality/balance/feasible stats (not relevant without local solve data)
+  const statsToShow = opsOnly
+    ? `
+    <div class="stat-card">
+      <div class="stat-val ${pctColor}">${pct}%</div>
+      <div class="stat-lbl">Coverage (${s.assigned}/${s.total})</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val ${(s.unassigned??0)===0?'green':'red'}">${s.unassigned??0}</div>
+      <div class="stat-lbl">Unassigned</div>
+    </div>`
+    : `
     <div class="stat-card">
       <div class="stat-val ${pctColor}">${pct}%</div>
       <div class="stat-lbl">Coverage (${s.assigned}/${s.total})</div>
@@ -3857,8 +3888,9 @@ function renderStats(s) {
     <div class="stat-card">
       <div class="stat-val ${status==='OPTIMAL'?'green':''}">${solveTime}${typeof solveTime === 'number' ? 's' : ''}</div>
       <div class="stat-lbl">${status}</div>
-    </div>
-  `;
+    </div>`;
+
+  bar.innerHTML = statsToShow;
 }
 
 function renderTeams(teams) {
@@ -6161,14 +6193,9 @@ function renderDatePicker(dates) {
   var existing = document.getElementById('recent-dates');
   if (existing) existing.remove();
   var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
+  // In ops mode: date picker is shown inline via _showOpsDatePicker — don't append to sidebar
+  if (opsOnly) return;
   var sidebar = document.getElementById('sidebar');
-  // In ops mode, attach to main content area instead of hidden sidebar
-  if (opsOnly) {
-    var opsList = document.getElementById('ops-date-list');
-    if (opsList) return; // already rendered inline
-    // Render as a floating panel in main content
-    sidebar = document.getElementById('main-content') || document.querySelector('main') || document.body;
-  }
   if (!sidebar) return;
 
   var div = document.createElement('div');
