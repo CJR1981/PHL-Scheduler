@@ -1829,14 +1829,15 @@ async function confirmSchedule() {
   try {
     const resp = await fetch(`/api/daily/${date}/confirm`, {
       method: 'POST',
-      headers: { 'X-Auth-Token': token, 'Content-Type': 'application/json' }
+      headers: { 'X-Auth-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
     });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || 'Confirm failed');
 
     window._scheduleStatus = 'confirmed';
     updateStatusBadge('confirmed');
-    showToast('Schedule confirmed and published', 3000);
+    showToast(`✓ Schedule confirmed and published to ramp (${data.total || '?'} flights)`, 4000);
   } catch(e) {
     alert('Error confirming: ' + e.message);
     if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Schedule'; }
@@ -2562,21 +2563,44 @@ function renderMovePreview(tid) {
 
 
 // ── API calls ─────────────────────────────────────────────────────────────
+// ── Live ops routing helper ─────────────────────────────────────────────
+// In ops mode (Render): always use /api/daily/<date>/combined/liveops
+// On Mac (local): use in-memory session endpoints if sessionId available
+function _liveopsUrl(opType, sessionPayload, dailyPayload) {
+  var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
+  var date    = window._scheduleDate;
+  var token   = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
+  var headers = {'Content-Type':'application/json','X-Auth-Token': token};
+
+  if (opsOnly || !sessionId || !date) {
+    // Render path — always use persisted schedule endpoint
+    if (!date) { alert('No schedule date loaded. Reload the page.'); return null; }
+    return {
+      url:     `/api/daily/${date}/combined/liveops`,
+      body:    JSON.stringify({ type: opType, payload: dailyPayload }),
+      headers: headers,
+    };
+  }
+  // Mac path — use fast in-memory session
+  return {
+    url:     sessionPayload.url,
+    body:    JSON.stringify(sessionPayload.body),
+    headers: headers,
+  };
+}
+
 async function submitSickCall() {
   const teamId = document.getElementById('sick-team-select').value;
   if (!teamId) { alert('Select a team'); return; }
   const btn = document.getElementById('sick-confirm');
   btn.textContent = 'Reassigning…'; btn.disabled = true;
   try {
-    let url, fetchBody, authHeader = {'Content-Type':'application/json','X-Auth-Token':localStorage.getItem('phl_auth_token')||''};
-    if (sessionId) {
-      url       = '/api/sick-call';
-      fetchBody = JSON.stringify({ session_id: sessionId, team_id: teamId, time_limit: 60 });
-    } else {
-      url       = `/api/daily/${window._scheduleDate}/${window._currentShift}/liveops`;
-      fetchBody = JSON.stringify({ type: 'sick_call', payload: { team_id: teamId, time_limit: 60 } });
-    }
-    const resp = await fetch(url, { method: 'POST', headers: authHeader, body: fetchBody });
+    const _sr = _liveopsUrl('sick_call',
+      { url: '/api/sick-call', body: { session_id: sessionId, team_id: teamId, time_limit: 60 } },
+      { team_id: teamId, time_limit: 60 }
+    );
+    if (!_sr) { btn.textContent='Reassigning…'; btn.disabled=false; return; }
+    const resp = await fetch(_sr.url, { method:'POST', headers:_sr.headers, body:_sr.body });
     const data = await resp.json();
     const res = document.getElementById('sick-result');
     res.style.display = 'block';
@@ -2872,10 +2896,12 @@ async function submitDelay() {
     const newGate = document.getElementById('delay-gate').value.trim().toUpperCase();
     if (!flight || !newGate) { alert('Select a flight and enter a new gate'); return; }
     try {
-      const r = await fetch('/api/gate-change', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({session_id: sessionId, flight, new_gate: newGate})
-      });
+      const _gr = _liveopsUrl('gate_change',
+        { url: '/api/gate-change', body: { session_id: sessionId, flight, new_gate: newGate } },
+        { flight, new_gate: newGate }
+      );
+      if (!_gr) return;
+      const r = await fetch(_gr.url, { method:'POST', headers:_gr.headers, body:_gr.body });
       const data = await r.json();
       res.style.display = 'block';
       if (data.success) {
@@ -2904,10 +2930,12 @@ async function submitDelay() {
   if (!_delayAnalyseResult) {
     btn.textContent = 'Analysing…'; btn.disabled = true;
     try {
-      const r = await fetch('/api/delay', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({session_id: sessionId, flight, new_std: newStd})
-      });
+      const _dr = _liveopsUrl('delay',
+        { url: '/api/delay', body: { session_id: sessionId, flight, new_std: newStd } },
+        { flight, new_std: newStd }
+      );
+      if (!_dr) { btn.textContent='Analyse Impact'; btn.disabled=false; return; }
+      const r = await fetch(_dr.url, { method:'POST', headers:_dr.headers, body:_dr.body });
       const data = await r.json();
       res.style.display = 'block';
       if (!data.success) {
@@ -3158,14 +3186,15 @@ async function applyDelayDecisions() {
   }
 
   try {
-    const r = await fetch('/api/delay/apply', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        session_id: sessionId,
-        delay_result: modifiedResult,
-        apply_auto_fixes: true
-      })
-    });
+    const _delayApplyR = _liveopsUrl('delay',
+      { url: '/api/delay/apply',
+        body: { session_id: sessionId, delay_result: modifiedResult, apply_auto_fixes: true } },
+      { flight: modifiedResult.flight,
+        new_std: modifiedResult.new_std || modifiedResult.proposed_std,
+        apply_auto_fixes: true }
+    );
+    if (!_delayApplyR) return;
+    const r = await fetch(_delayApplyR.url, { method:'POST', headers:_delayApplyR.headers, body:_delayApplyR.body });
     const applyData = await r.json();
     if (applyData.success) {
       cascade.style.display = 'none';
@@ -3204,15 +3233,12 @@ async function submitMove(force) {
   const team   = document.getElementById('move-team-select').value;
   if (!flight || !team) { alert('Enter flight number and select team'); return; }
   try {
-    let url, fetchBody, authHeader = {'Content-Type':'application/json','X-Auth-Token':localStorage.getItem('phl_auth_token')||''};
-    if (sessionId) {
-      url       = '/api/reassign';
-      fetchBody = JSON.stringify({ session_id: sessionId, flight, team, force: !!force });
-    } else {
-      url       = `/api/daily/${window._scheduleDate}/${window._currentShift}/liveops`;
-      fetchBody = JSON.stringify({ type: 'reassign', payload: { flight, new_team: team, force: !!force } });
-    }
-    const resp = await fetch(url, { method: 'POST', headers: authHeader, body: fetchBody });
+    const _mr = _liveopsUrl('reassign',
+      { url: '/api/reassign', body: { session_id: sessionId, flight, team, force: !!force } },
+      { flight, new_team: team, force: !!force }
+    );
+    if (!_mr) return;
+    const resp = await fetch(_mr.url, { method:'POST', headers:_mr.headers, body:_mr.body });
     const data = await resp.json();
     const res = document.getElementById('move-result');
     res.style.display = 'block';
@@ -5108,16 +5134,16 @@ function dbOpenTeamDecision(teamId) {
 }
 
 async function dbApplyRecommendation(flightNum, teamId) {
-  var sid = sessionId || (fullScheduleData&&fullScheduleData.session_id) || (scheduleData&&scheduleData.session_id) || '';
-  if (!sid || !flightNum || !teamId) return;
+  if (!flightNum || !teamId) return;
   var btn = event && event.currentTarget;
   var origText = btn ? btn.querySelector('.db-rec-title') : null;
   try {
-    var resp = await fetch('/api/reassign', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({session_id: sid, flight: flightNum, team: teamId})
-    });
+    var _rr = _liveopsUrl('reassign',
+      { url: '/api/reassign', body: { session_id: sessionId, flight: flightNum, team: teamId } },
+      { flight: flightNum, new_team: teamId, force: false }
+    );
+    if (!_rr) return;
+    var resp = await fetch(_rr.url, { method:'POST', headers:_rr.headers, body:_rr.body });
     var data = await resp.json();
     if (data.success) {
       if (data.result) { setScheduleFromServer(data.result); renderResults(scheduleData); }
@@ -5125,11 +5151,12 @@ async function dbApplyRecommendation(flightNum, teamId) {
       loadDispatchBoard();
     } else if (data.timing_conflict && data.can_force) {
       if (confirm('Timing conflict: ' + (data.error||'') + '\n\nForce assign anyway?')) {
-        var r2 = await fetch('/api/reassign', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({session_id: sid, flight: flightNum, team: teamId, force: true})
-        });
+        var _rrf = _liveopsUrl('reassign',
+          { url: '/api/reassign', body: { session_id: sessionId, flight: flightNum, team: teamId, force: true } },
+          { flight: flightNum, new_team: teamId, force: true }
+        );
+        if (!_rrf) return;
+        var r2 = await fetch(_rrf.url, { method:'POST', headers:_rrf.headers, body:_rrf.body });
         var d2 = await r2.json();
         if (d2.success) {
           if (d2.result) { setScheduleFromServer(d2.result); renderResults(scheduleData); }
@@ -6030,7 +6057,7 @@ function _showOpsDatePicker(date, token, opsOnly) {
     '<div style="font-size:42px">📋</div>',
     '<div style="font-size:16px;font-weight:600;color:var(--text,#1e293b)">No schedule for ' + date + '</div>',
     '<div style="font-size:13px;color:var(--muted,#64748b);max-width:340px;line-height:1.6">',
-    'Generate a schedule on your local Mac — it will appear here automatically.<br>',
+    'Generate and <strong>Confirm</strong> a schedule on your local Mac — it will appear here automatically.<br>Or load a previously confirmed schedule:',
     'Or load a previously saved schedule:',
     '</div>',
     '<div id="ops-date-list" style="display:flex;flex-direction:column;gap:6px;width:100%;max-width:320px"></div>',
@@ -6068,58 +6095,12 @@ function loadSavedSchedule(date, shift) {
   .then(function(data){
     if (data.error) { console.warn('loadSavedSchedule:', data.error); return; }
     if (!data.found) {
-      // ── Sessions table fallback ──────────────────────────────────────────
-      // daily_schedules save can fail (502 timeout). Sessions always exist.
-      // Try to find a session matching this date and load its result directly.
+      // ── No confirmed schedule for this date ────────────────────────────
+      // Render only reads from daily_schedules (confirmed schedules).
+      // Sessions are the Mac's working draft — not shown here.
       var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
-      fetch('/api/sessions', { headers: {'X-Auth-Token': token} })
-        .then(function(r2){ return r2.json(); })
-        .then(function(sessData){
-          var sessions = sessData.sessions || [];
-          // Capture latest session_id for live ops
-          if (sessions.length) sessionId = sessions[0].session_id || sessions[0].id;
-
-          // Find session matching requested date (or just take the most recent)
-          var match = sessions.find(function(s){
-            var sd = s.schedule_date ? String(s.schedule_date).slice(0,10) : '';
-            return sd === date;
-          }) || sessions[0];
-
-          if (!match) {
-            // No sessions either — show date picker
-            _showOpsDatePicker(date, token, opsOnly);
-            return;
-          }
-
-          var sid = match.session_id || match.id;
-          sessionId = sid;
-
-          // Fetch full result from /api/session/<id>
-          fetch('/api/session/' + sid, { headers: {'X-Auth-Token': token} })
-            .then(function(r3){ return r3.json(); })
-            .then(function(full){
-              if (full && full.result && (full.result.assignments || full.result.unassigned)) {
-                console.log('[loadSavedSchedule] Loaded from sessions table:', sid);
-                var result = full.result;
-                window._currentShift  = 'combined';
-                window._scheduleDate  = date;
-                window._scheduleStatus = 'live';
-                fullScheduleData = result;
-                scheduleData = result;
-                currentView = 'full';
-                window._scheduleDay = result.day_of_week || window._scheduleDay;
-                renderResults(result);
-                populateLiveOpsDropdowns(result);
-                var sb = document.getElementById('sidebar');
-                if (sb && !sb.classList.contains('collapsed')) collapseSidebar(result);
-              } else {
-                _showOpsDatePicker(date, token, opsOnly);
-              }
-            })
-            .catch(function(){ _showOpsDatePicker(date, token, opsOnly); });
-        })
-        .catch(function(){ _showOpsDatePicker(date, token, opsOnly); });
-      return;  // exit — sessions fetch is async
+      _showOpsDatePicker(date, token, opsOnly);
+      return;
     }
     // Schedule found — render it
     window._currentShift  = 'combined';

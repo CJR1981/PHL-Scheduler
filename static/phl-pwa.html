@@ -270,17 +270,11 @@ html, body {
 .tm-v { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--mono-c); }
 
 /* ── LIVEOPS ───────────────────────────────────────────── */
-.lo-tabs {
-  display: flex; border-bottom: 1px solid var(--border);
-  background: var(--bg-card); position: sticky; top: 0; z-index: 5;
-}
-.lo-tab { flex: 1; padding: 12px 4px; background: none; border: none;
-  font-family: var(--ui); font-size: 12px; font-weight: 600;
-  letter-spacing: .04em; color: var(--text3); cursor: pointer;
-  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all .15s; }
-.lo-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
-.lo-panel { display: none; }
-.lo-panel.active { display: block; }
+
+
+
+
+
 
 .form-card { background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 10px; overflow: hidden; margin: 0 12px; }
@@ -296,16 +290,10 @@ html, body {
 }
 .fsel:focus, .finp:focus { border-color: var(--amber); }
 
-.btn-act {
-  width: calc(100% - 24px); margin: 12px; background: var(--bg-card2);
-  border: 1px solid var(--border2); border-radius: 10px; color: var(--text);
-  font-family: var(--ui); font-size: 14px; font-weight: 600; padding: 14px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  gap: 8px; transition: all .15s;
-}
-.btn-act:active { background: var(--amber-gl); border-color: var(--amber-d); }
-.btn-act.suc { border-color: rgba(34,197,94,.3); color: var(--green); }
-.btn-act.dan { border-color: rgba(239,68,68,.3); color: var(--red); }
+
+
+
+
 
 .res-box { margin: 0 12px 12px; background: var(--bg-card);
   border: 1px solid var(--border2); border-radius: 10px;
@@ -434,70 +422,34 @@ html, body {
       </div>
       <div class="no-sched" id="no-sched" style="display:none">
         <div class="ico">⚠️</div>
-        <div class="msg"><strong>No schedule found.</strong><br>
-          Generate a schedule on the desktop app — it will appear here automatically. Pull down to refresh.</div>
+        <div class="msg"><strong>No confirmed schedule found.</strong><br>
+          The manager needs to generate and confirm today's schedule. Pull down to refresh once confirmed.</div>
       </div>
       <div id="fl-list"></div>
     </div>
 
-    <!-- LIVE OPS -->
+    <!-- INFO (replaces Live Ops on mobile) -->
     <div class="screen" id="sc-liveops">
-      <div class="lo-tabs">
-        <button class="lo-tab active" data-tab="delay">Delay / ETD</button>
-        <button class="lo-tab" data-tab="gate">Gate Change</button>
-        <button class="lo-tab" data-tab="reasgn">Reassign</button>
-      </div>
-
-      <!-- DELAY -->
-      <div class="lo-panel active" id="panel-delay">
-        <div class="sec-hdr" style="padding-top:16px"><span class="sec-ttl">Update ETD</span></div>
-        <div class="form-card">
-          <div class="fr">
-            <span class="fr-l">Flight</span>
-            <select class="fsel" id="d-fl"><option value="">Select flight…</option></select>
-          </div>
-          <div class="fr">
-            <span class="fr-l">New ETD</span>
-            <input class="finp" id="d-etd" type="time">
+      <div style="padding:32px 20px;text-align:center">
+        <div style="font-size:48px;margin-bottom:16px">🖥️</div>
+        <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--amber);letter-spacing:.08em;margin-bottom:12px">DESKTOP ONLY</div>
+        <div style="font-size:14px;color:var(--text2);line-height:1.7;max-width:280px;margin:0 auto">
+          Flight delays, gate changes, and reassignments are managed from the
+          <strong style="color:var(--text)">desktop scheduler</strong> at
+          <span style="font-family:var(--mono);color:var(--amber)">phl-scheduler-1.onrender.com</span>
+        </div>
+        <div style="margin-top:32px;padding:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;text-align:left">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:10px">Mobile — Read Only</div>
+          <div style="font-size:13px;color:var(--text2);display:flex;flex-direction:column;gap:8px">
+            <div>✅ View today's flight schedule</div>
+            <div>✅ Filter by type / status</div>
+            <div>✅ Look up team assignments</div>
+            <div>✅ See team workload & ops</div>
+            <div style="color:var(--text3)">— Delay updates (desktop)</div>
+            <div style="color:var(--text3)">— Gate changes (desktop)</div>
+            <div style="color:var(--text3)">— Flight reassignment (desktop)</div>
           </div>
         </div>
-        <button class="btn-act" onclick="doDelay()">⏱ Analyze Delay Impact</button>
-        <div class="res-box" id="d-res"><div class="res-ttl">Impact</div><div id="d-res-body"></div></div>
-      </div>
-
-      <!-- GATE -->
-      <div class="lo-panel" id="panel-gate">
-        <div class="sec-hdr" style="padding-top:16px"><span class="sec-ttl">Update Gate</span></div>
-        <div class="form-card">
-          <div class="fr">
-            <span class="fr-l">Flight</span>
-            <select class="fsel" id="g-fl"><option value="">Select flight…</option></select>
-          </div>
-          <div class="fr">
-            <span class="fr-l">New Gate</span>
-            <input class="finp" id="g-gate" type="text" placeholder="e.g. B12"
-              maxlength="5" style="text-transform:uppercase">
-          </div>
-        </div>
-        <button class="btn-act" onclick="doGate()">🔀 Apply Gate Change</button>
-        <div class="res-box" id="g-res"><div class="res-ttl">Gate Update</div><div id="g-res-body"></div></div>
-      </div>
-
-      <!-- REASSIGN -->
-      <div class="lo-panel" id="panel-reasgn">
-        <div class="sec-hdr" style="padding-top:16px"><span class="sec-ttl">Reassign Flight</span></div>
-        <div class="form-card">
-          <div class="fr">
-            <span class="fr-l">Flight</span>
-            <select class="fsel" id="r-fl"><option value="">Select flight…</option></select>
-          </div>
-          <div class="fr">
-            <span class="fr-l">New Team</span>
-            <select class="fsel" id="r-tm"><option value="">Select team…</option></select>
-          </div>
-        </div>
-        <button class="btn-act suc" onclick="doReasgn()">✓ Apply Reassignment</button>
-        <div class="res-box" id="r-res"><div class="res-ttl">Reassignment</div><div id="r-res-body"></div></div>
       </div>
     </div>
 
@@ -518,7 +470,7 @@ html, body {
       <span class="nb-icon">📋</span><span class="nb-label">Schedule</span>
     </button>
     <button class="nb" data-s="liveops" onclick="goScreen('liveops')">
-      <span class="nb-icon">⚡</span><span class="nb-label">Live Ops</span>
+      <span class="nb-icon">ℹ️</span><span class="nb-label">Info</span>
     </button>
     <button class="nb" data-s="teams" onclick="goScreen('teams')">
       <span class="nb-icon">👥</span><span class="nb-label">Teams</span>
@@ -754,7 +706,6 @@ async function loadSchedule() {
     localStorage.setItem('phl_sched_date', S.schedDate || isoToday());
     renderSched();
     renderTeams();
-    fillDropdowns();
     // Show which date loaded
     const label = S.schedDate ? ` (${S.schedDate})` : '';
     toast(`Schedule loaded${label}`, 'ok');
@@ -766,8 +717,7 @@ async function loadSchedule() {
       processSchedule(JSON.parse(cached));
       renderSched();
       renderTeams();
-      fillDropdowns();
-      const label = cachedDate ? ` (${cachedDate})` : '';
+        const label = cachedDate ? ` (${cachedDate})` : '';
       toast(`Cached schedule${label}`, 'warn');
     } else {
       showNoSched();
@@ -1075,182 +1025,9 @@ function openTD(t) {
 }
 function closeTD() { document.getElementById('td-wrap').classList.remove('open'); }
 
-/* ============================================================
-   FILL LIVE OPS DROPDOWNS
-   ============================================================ */
-function fillDropdowns() {
-  const sorted = [...S.assignments].sort((a,b) => tm(a.etd) - tm(b.etd));
-  const flOpts = '<option value="">Select flight…</option>' +
-    sorted.map(f =>
-      `<option value="${f.flight}">AA ${f.flight} → ${f.dest} @ ${fmt(f.etd)}</option>`
-    ).join('');
 
-  const tmOpts = '<option value="">Select team…</option>' +
-    Object.keys(S.teams).sort().map(t => `<option value="${t}">${t}</option>`).join('');
 
-  ['d-fl','g-fl','r-fl'].forEach(id => document.getElementById(id).innerHTML = flOpts);
-  document.getElementById('r-tm').innerHTML = tmOpts;
-}
 
-/* ============================================================
-   LIVE OPS ACTIONS
-
-   Correct API shapes (from app.py):
-   - /api/delay        POST { session_id, flight, new_std }     → impact analysis
-   - /api/delay/apply  POST { session_id, delay_result }        → commit
-   - /api/gate-change  POST { session_id, flight, new_gate }    → commit
-   - /api/reassign     POST { session_id, flight, team }        → commit
-   ============================================================ */
-
-async function doDelay() {
-  const flight  = document.getElementById('d-fl').value;
-  const newEtd  = document.getElementById('d-etd').value;
-  if (!flight || !newEtd) { toast('Select flight and enter new ETD', 'warn'); return; }
-
-  const resBox  = document.getElementById('d-res');
-  const resBody = document.getElementById('d-res-body');
-  resBody.innerHTML = '<div style="color:var(--text3);font-size:13px">Analyzing…</div>';
-  resBox.className  = 'res-box show';
-
-  try {
-    if (!S.sessionId) throw new Error('No active session — open desktop app and generate schedule first');
-
-    // Step 1: analyze
-    const impact = await api('/api/delay', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: S.sessionId, flight, new_std: newEtd })
-    });
-
-    // Step 2: commit
-    await api('/api/delay/apply', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: S.sessionId, delay_result: impact, apply_auto_fixes: true })
-    });
-
-    const orig = S.assignments.find(a => String(a.flight) === String(flight));
-    const oldT = orig ? fmt(orig.etd) : '—';
-    const conflicts = impact.cascade_conflicts || impact.conflicts || [];
-
-    let html = `<div class="res-ln">AA ${flight}: ${oldT} → ${newEtd}</div>`;
-    if (conflicts.length) {
-      html += `<div class="res-ln" style="color:var(--red)">⚠ ${conflicts.length} cascade conflict(s)</div>`;
-      conflicts.slice(0,3).forEach(c => {
-        html += `<div class="res-ln" style="font-size:12px;color:var(--text2)">${typeof c==='string'?c:JSON.stringify(c)}</div>`;
-      });
-      resBox.className = 'res-box show warn';
-    } else {
-      html += `<div class="res-ln" style="color:var(--green)">✓ No cascade conflicts</div>`;
-      resBox.className = 'res-box show ok';
-    }
-    resBody.innerHTML = html;
-    toast(`ETD updated: AA ${flight}`, 'ok');
-
-    // Update local display
-    if (orig) orig.etd = newEtd;
-    renderFlightList();
-
-  } catch(e) {
-    resBody.innerHTML = `<div class="res-ln" style="color:var(--red)">${e.message}</div>`;
-    resBox.className  = 'res-box show err';
-    toast(e.message, 'err');
-  }
-}
-
-async function doGate() {
-  const flight  = document.getElementById('g-fl').value;
-  const newGate = document.getElementById('g-gate').value.trim().toUpperCase();
-  if (!flight || !newGate) { toast('Select flight and enter new gate', 'warn'); return; }
-
-  const resBox  = document.getElementById('g-res');
-  const resBody = document.getElementById('g-res-body');
-  resBody.innerHTML = '<div style="color:var(--text3);font-size:13px">Applying…</div>';
-  resBox.className  = 'res-box show';
-
-  try {
-    if (!S.sessionId) throw new Error('No active session — open desktop app and generate schedule first');
-
-    await api('/api/gate-change', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: S.sessionId, flight, new_gate: newGate })
-    });
-
-    const orig = S.assignments.find(a => String(a.flight) === String(flight));
-    const oldG = orig ? orig.gate : '—';
-    if (orig) orig.gate = newGate;
-
-    resBody.innerHTML = `
-      <div class="res-ln">AA ${flight}: Gate ${oldG} → ${newGate}</div>
-      <div class="res-ln" style="color:var(--green)">✓ Updated</div>`;
-    resBox.className = 'res-box show ok';
-    toast(`Gate updated: AA ${flight} → ${newGate}`, 'ok');
-    renderFlightList();
-
-  } catch(e) {
-    resBody.innerHTML = `<div class="res-ln" style="color:var(--red)">${e.message}</div>`;
-    resBox.className  = 'res-box show err';
-    toast(e.message, 'err');
-  }
-}
-
-async function doReasgn() {
-  const flight  = document.getElementById('r-fl').value;
-  const newTeam = document.getElementById('r-tm').value;
-  if (!flight || !newTeam) { toast('Select flight and team', 'warn'); return; }
-
-  const resBox  = document.getElementById('r-res');
-  const resBody = document.getElementById('r-res-body');
-  resBody.innerHTML = '<div style="color:var(--text3);font-size:13px">Applying…</div>';
-  resBox.className  = 'res-box show';
-
-  try {
-    if (!S.sessionId) throw new Error('No active session — open desktop app and generate schedule first');
-
-    // /api/reassign expects: { session_id, flight, team }
-    await api('/api/reassign', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: S.sessionId, flight, team: newTeam })
-    });
-
-    const orig    = S.assignments.find(a => String(a.flight) === String(flight));
-    const oldTeam = orig ? orig.team : 'UNASSIGNED';
-
-    // Update local state
-    if (orig) {
-      if (oldTeam && S.teams[oldTeam])
-        S.teams[oldTeam].ops = S.teams[oldTeam].ops.filter(o => o.flight !== orig.flight);
-      orig.team = newTeam;
-      if (!S.teams[newTeam]) S.teams[newTeam] = { id: newTeam, ops: [] };
-      S.teams[newTeam].ops.push(orig);
-      S.teams[newTeam].ops.sort((a,b) => tm(a.etd) - tm(b.etd));
-    }
-
-    resBody.innerHTML = `
-      <div class="res-ln">AA ${flight}</div>
-      <div class="res-ln">${oldTeam||'UNASSIGNED'} → ${newTeam}</div>
-      <div class="res-ln" style="color:var(--green)">✓ Reassigned</div>`;
-    resBox.className = 'res-box show ok';
-    toast(`AA ${flight} → ${newTeam}`, 'ok');
-    renderFlightList();
-    renderTeams();
-
-  } catch(e) {
-    resBody.innerHTML = `<div class="res-ln" style="color:var(--red)">${e.message}</div>`;
-    resBox.className  = 'res-box show err';
-    toast(e.message, 'err');
-  }
-}
-
-/* ============================================================
-   LIVE OPS TABS
-   ============================================================ */
-document.querySelectorAll('.lo-tab').forEach(t => {
-  t.addEventListener('click', () => {
-    document.querySelectorAll('.lo-tab').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.lo-panel').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    document.getElementById(`panel-${t.dataset.tab}`).classList.add('active');
-  });
-});
 
 /* ============================================================
    NAVIGATION
