@@ -44,11 +44,11 @@ def index():
 
 @app.route('/api/config')
 def app_config():
-    """Frontend config — tells the UI which features are enabled on this server."""
+    """Server capability flags — Mac local version always has full access."""
     return jsonify({
-        'schedule_generation': os.environ.get('DISABLE_SCHEDULE_GENERATION', '').lower() != 'true',
-        'server': 'render' if os.environ.get('DISABLE_SCHEDULE_GENERATION') else 'local',
-        'version': '2.6',
+        'schedule_generation': True,
+        'server': 'local',
+        'version': '3.0',
     })
 
 
@@ -64,20 +64,13 @@ def pwa():
 
 @app.route('/api/schedule', methods=['POST'])
 def schedule():
-    # Schedule generation is disabled on Render — run locally on your Mac.
-    # Set DISABLE_SCHEDULE_GENERATION=true in Render env vars to enforce this.
-    if os.environ.get('DISABLE_SCHEDULE_GENERATION', '').lower() == 'true':
-        return jsonify({
-            'error': 'Schedule generation is disabled on this server. '
-                     'Generate schedules locally and they will sync here automatically.'
-        }), 403
     try:
         dep_file  = request.files.get('departures')
         arr_file  = request.files.get('arrivals')
         ft_file   = request.files.get('ft_agents')
         pt_file   = request.files.get('pt_agents')
         day       = request.form.get('day_of_week', 'Saturday')
-        time_lim  = int(request.form.get('time_limit', 240))  # 240s — Render free tier is ~3x slower than local
+        time_lim  = int(request.form.get('time_limit', 120))
         shift     = request.form.get('shift', 'combined')  # morning | afternoon | combined
         sched_date = request.form.get('schedule_date', str(__import__('datetime').date.today()))
         auth_token = request.form.get('auth_token') or request.headers.get('X-Auth-Token','')
@@ -152,20 +145,12 @@ def schedule():
             'pt_path':       pt_copy,
         })
 
-        # Persist to Supabase in background thread — decoupled from HTTP
-        # response so a gunicorn 502 timeout can't prevent the save.
-        import threading as _threading
-        def _bg_save(_sd=sched_date, _sh=shift, _res=result, _day=day,
-                     _uid=user['user_id'] if user else None):
-            try:
-                from schedule_store import save_schedule as _ss
-                _ss(_sd, _sh, _res, _day, created_by=_uid, status='live')
-                print(f'[app] schedule saved Supabase: {_sd} {_sh}')
-            except Exception as _e:
-                import traceback as _tb
-                print(f'[app] save_schedule failed: {_e}')
-                print(_tb.format_exc())
-        _threading.Thread(target=_bg_save, daemon=True).start()
+        # NOTE: We do NOT auto-save to daily_schedules on generation.
+        # daily_schedules is only written when the manager clicks Confirm Schedule.
+        # This ensures Render + mobile only ever see a fully reviewed schedule.
+        # Sessions table is updated automatically by save_session() above.
+        print(f"[app] schedule generated → session {session_id} ({sched_date} {shift}) "
+              f"— click Confirm to publish to Render/mobile")
 
         return jsonify({**result, 'session_id': session_id,
                         'shift': shift, 'schedule_date': sched_date})
@@ -1134,7 +1119,9 @@ def get_daily_view(schedule_date, view_name):
 @app.route('/api/daily/<schedule_date>/confirm', methods=['POST'])
 def confirm_schedule(schedule_date):
     """
-    Confirm a schedule — sets status to 'confirmed'.
+    Confirm a schedule — saves full result from session into daily_schedules
+    with status='confirmed'. This is the publish step that makes the schedule
+    visible to Render desktop and mobile PWA.
     Only admin, manager, supervisor can confirm.
     """
     try:
@@ -1146,22 +1133,67 @@ def confirm_schedule(schedule_date):
         if user['role'] not in ('manager', 'admin', 'supervisor'):
             return jsonify({'error': 'Insufficient permissions — manager/admin/supervisor required'}), 403
 
-        from schedule_store import get_client
-        sb = get_client()
+        data = request.get_json() or {}
+        session_id_from_req = data.get('session_id')
 
-        # Update all shifts for this date to 'confirmed'
-        sb.table('daily_schedules').update({
-            'status': 'confirmed',
-            'updated_at': __import__('datetime').datetime.utcnow().isoformat(),
-        }).eq('schedule_date', schedule_date).execute()
+        # ── Step 1: Get the full result from session (in-memory or Supabase)
+        result = None
+        day_of_week = None
 
-        from schedule_store import log_modification
-        log_modification(schedule_date, 'combined',
-                        user.get('id', 0), user.get('display_name', user.get('username', '')),
-                        'confirm', f"Schedule confirmed by {user.get('display_name', user.get('username', ''))}",
-                        {'confirmed_by': user.get('username', '')})
+        # Try in-memory session first
+        try:
+            session = load_session(session_id_from_req) if session_id_from_req else None
+            if session and session.get('result'):
+                result = session['result']
+                day_of_week = session.get('day', session.get('day_of_week', ''))
+                print(f"[confirm] Got result from in-memory session: {session_id_from_req}")
+        except Exception as _e:
+            print(f"[confirm] in-memory session lookup failed: {_e}")
 
-        return jsonify({'ok': True, 'status': 'confirmed', 'schedule_date': schedule_date})
+        # Fallback: load from Supabase sessions table
+        if not result:
+            try:
+                from supabase_client import get_client as _sc
+                sb2 = _sc()
+                # Get most recent session for this date
+                rows = sb2.table('sessions')                    .select('id,result,day_of_week')                    .eq('schedule_date', schedule_date)                    .order('created_at', desc=True)                    .limit(1).execute()
+                if rows.data:
+                    result = rows.data[0].get('result')
+                    day_of_week = rows.data[0].get('day_of_week', '')
+                    print(f"[confirm] Got result from Supabase sessions table")
+            except Exception as _e:
+                print(f"[confirm] Supabase session lookup failed: {_e}")
+
+        if not result:
+            return jsonify({'error': 'No schedule found for this date — generate first'}), 404
+
+        # ── Step 2: Save full result to daily_schedules with status=confirmed
+        try:
+            from schedule_store import save_schedule as _ss
+            _ss(schedule_date, 'combined', result, day_of_week or '',
+                created_by=user['user_id'],
+                status='confirmed')
+            print(f"[confirm] ✓ Saved to daily_schedules: {schedule_date} confirmed")
+        except Exception as _e:
+            import traceback as _tb
+            print(f"[confirm] save failed: {_e}")
+            print(_tb.format_exc())
+            return jsonify({'error': f'Failed to save: {str(_e)}'}), 500
+
+        # ── Step 3: Log the confirmation
+        try:
+            from schedule_store import log_modification
+            log_modification(schedule_date, 'combined',
+                            user.get('user_id', user.get('id', 0)),
+                            user.get('display_name', user.get('username', '')),
+                            'confirm',
+                            f"Schedule confirmed and published by {user.get('display_name', user.get('username', ''))}",
+                            {'confirmed_by': user.get('username', '')})
+        except Exception as _e:
+            print(f"[confirm] log_modification failed (non-fatal): {_e}")
+
+        return jsonify({'ok': True, 'status': 'confirmed', 'schedule_date': schedule_date,
+                        'total': result.get('stats', {}).get('total', '?')})
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
@@ -1218,10 +1250,14 @@ def daily_liveops(schedule_date, shift):
         payload = data.get('payload', {})
 
         # Load current schedule from Supabase
+        # Try 'combined' first (how Confirm saves it), then the requested shift
         from schedule_store import load_schedule, update_schedule_result, log_modification
-        rec = load_schedule(schedule_date, shift)
+        rec = load_schedule(schedule_date, 'combined') or load_schedule(schedule_date, shift)
         if not rec:
-            return jsonify({'error': 'Schedule not found'}), 404
+            return jsonify({'error': f'No confirmed schedule found for {schedule_date}. '
+                                     'Generate and Confirm a schedule on the Mac first.'}), 404
+        # Use the actual shift from the record
+        shift = rec.get('shift', shift)
 
         # Apply the live op using existing live_ops engine
         from live_ops import handle_sick_call, handle_delay, apply_delay, handle_reassign, handle_gate_change
