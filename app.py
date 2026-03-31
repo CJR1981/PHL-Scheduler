@@ -1253,12 +1253,15 @@ def daily_liveops(schedule_date, shift):
         # Load current schedule from Supabase
         # Try 'combined' first (how Confirm saves it), then the requested shift
         from schedule_store import load_schedule, update_schedule_result, log_modification
-        rec = load_schedule(schedule_date, 'combined') or load_schedule(schedule_date, shift)
+        # Try all valid shift values — confirm saves as 'morning' (combined violates constraint)
+        rec = (load_schedule(schedule_date, 'combined') or
+               load_schedule(schedule_date, 'morning') or
+               load_schedule(schedule_date, 'afternoon'))
         if not rec:
             return jsonify({'error': f'No confirmed schedule found for {schedule_date}. '
                                      'Generate and Confirm a schedule on the Mac first.'}), 404
-        # Use the actual shift from the record
-        shift = rec.get('shift', shift)
+        # Use the actual shift from the record for the update
+        shift = rec.get('shift', 'morning')
 
         # Apply the live op using existing live_ops engine
         from live_ops import handle_sick_call, handle_delay, apply_delay, handle_reassign, handle_gate_change
