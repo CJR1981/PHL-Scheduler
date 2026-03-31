@@ -44,11 +44,12 @@ def index():
 
 @app.route('/api/config')
 def app_config():
-    """Server capability flags — Mac local version always has full access."""
+    """Server capability flags — reads DISABLE_SCHEDULE_GENERATION env var."""
+    disabled = os.environ.get('DISABLE_SCHEDULE_GENERATION', '').lower() == 'true'
     return jsonify({
-        'schedule_generation': True,
-        'server': 'local',
-        'version': '3.0',
+        'schedule_generation': not disabled,
+        'server': 'render' if disabled else 'local',
+        'version': '4.0',
     })
 
 
