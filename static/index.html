@@ -6085,41 +6085,39 @@ function loadSavedSchedule(date, shift) {
   var token = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY);
   if (!token) return;
   sessionId = null;
-  var loadShift = 'combined';
 
-  fetch('/api/daily/' + date + '/' + loadShift, {
-    headers: {'X-Auth-Token': token}
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(data){
-    if (data.error) { console.warn('loadSavedSchedule:', data.error); return; }
-    if (!data.found) {
-      // ── No confirmed schedule for this date ────────────────────────────
-      // Render only reads from daily_schedules (confirmed schedules).
-      // Sessions are the Mac's working draft — not shown here.
+  // Try combined → morning → afternoon
+  // Confirm saves as 'morning' due to daily_schedules_shift_check constraint
+  var shiftsToTry = ['combined', 'morning', 'afternoon'];
+  var shiftIdx = 0;
+
+  function tryNext() {
+    if (shiftIdx >= shiftsToTry.length) {
       var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
       _showOpsDatePicker(date, token, opsOnly);
       return;
     }
-    // Schedule found — render it
-    window._currentShift  = 'combined';
-    window._scheduleDate  = date;
-    window._scheduleStatus = data.status;
-    fullScheduleData = data;   // store full for view switching
-    scheduleData = data;
-    currentView = 'full';
-    window._scheduleDay = data.day_of_week || window._scheduleDay;
-    renderResults(data);
-    populateLiveOpsDropdowns(data);
-
-    // Collapse sidebar so main gets full width
-    var sb = document.getElementById('sidebar');
-    if (sb && !sb.classList.contains('collapsed')) { collapseSidebar(data); }
-
-    // Start polling for live updates
-    startPolling(date, 'combined');
-  })
-  .catch(function(e){ console.warn('loadSavedSchedule error:', e); });
+    var s = shiftsToTry[shiftIdx++];
+    fetch('/api/daily/' + date + '/' + s, { headers: {'X-Auth-Token': token} })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error || !data.found) { tryNext(); return; }
+        window._currentShift   = 'combined';
+        window._scheduleDate   = date;
+        window._scheduleStatus = data.status;
+        fullScheduleData = data;
+        scheduleData     = data;
+        currentView      = 'full';
+        window._scheduleDay = data.day_of_week || window._scheduleDay;
+        renderResults(data);
+        populateLiveOpsDropdowns(data);
+        var sb = document.getElementById('sidebar');
+        if (sb && !sb.classList.contains('collapsed')) { collapseSidebar(data); }
+        startPolling(date, 'combined');
+      })
+      .catch(function() { tryNext(); });
+  }
+  tryNext();
 }
 
 // ── Role-based boot after login ───────────────────────────────────────────
