@@ -531,6 +531,8 @@
   .btn-sick:hover  { border-color:var(--danger); color:var(--danger); }
   .btn-gate        { border-color:#d97706; color:#d97706; }
   .btn-gate:hover  { border-color:#b45309; color:#b45309; background:#fff7ed; }
+  .btn-truck       { border-color:#0369a1; color:#0369a1; }
+  .btn-truck:hover { border-color:#075985; color:#075985; background:#f0f9ff; }
   .btn-print { padding:6px 12px; border-radius:var(--radius); font-size:12px; font-weight:600;
     cursor:pointer; border:1px solid var(--border); background:var(--surface2);
     color:var(--text2); transition:all .15s; font-family:var(--sans); }
@@ -956,6 +958,7 @@ body.authenticated #login-screen { display: none !important; }
         <button class="btn-op btn-delay" id="btn-delay" onclick="openModal('delay')" disabled>Flight Delay</button>
         <button class="btn-op btn-gate"  id="btn-gate"  onclick="openGateChangeModal()" disabled>Gate Change</button>
         <button class="btn-op btn-move"  id="btn-move"  onclick="openModal('move')"  disabled>Reassign Flight</button>
+        <button class="btn-op btn-truck" id="btn-truck" onclick="openTruckPanel()"   disabled>Fleet</button>
         <span id="live-ops-hint" style="font-size:11px;color:var(--muted);margin-left:4px">
           Generate a schedule to enable
         </span>
@@ -1899,12 +1902,14 @@ async function runSchedule() {
     renderResults(data);
     populateLiveOpsDropdowns(data);
     // Enable live ops buttons now that we have a session
-    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-truck','btn-export'].forEach(id => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = false;
     });
     const hint = document.getElementById('live-ops-hint');
     if (hint) hint.style.display = 'none';
+    // Fetch fleet status in background (non-blocking)
+    setTimeout(function() { if (typeof loadFleetStatus === 'function') loadFleetStatus(); }, 200);
     // Collapse sidebar — no longer needed
     collapseSidebar(data);
   } catch(e) { showError('Error: ' + e.message); }
@@ -1969,6 +1974,313 @@ function closeModal(type) {
     const btn = document.getElementById('sick-confirm');
     btn.textContent = 'Remove Team & Reassign'; btn.disabled = false;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FLEET MANAGEMENT PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+function openTruckPanel() {
+  if (!sessionId && !scheduleData) {
+    alert('Generate a schedule first to manage fleet.');
+    return;
+  }
+  document.getElementById('modal-truck').classList.add('open');
+  switchTruckTab('fleet');
+  loadFleetStatus();
+}
+
+function closeTruckPanel() {
+  document.getElementById('modal-truck').classList.remove('open');
+}
+
+function switchTruckTab(tab) {
+  ['fleet','oos','swap'].forEach(function(t) {
+    document.getElementById('truck-tab-'+t).className = 'truck-tab' + (t===tab ? ' truck-tab-active' : '');
+    document.getElementById('truck-pane-'+t).style.display = t===tab ? '' : 'none';
+  });
+}
+
+async function loadFleetStatus() {
+  const sid = sessionId || (scheduleData && scheduleData.session_id);
+  if (!sid) return;
+  try {
+    const r = await fetch('/api/trucks/status?session_id='+encodeURIComponent(sid), {cache:'no-store'});
+    const data = await r.json();
+    if (data.error) { console.warn('Fleet status error:', data.error); return; }
+    window._fleetStatus = data;
+    _renderFleetRows(data.fleet || []);
+    _populateTruckSelects(data.fleet || []);
+    // Update subtitle
+    const sub = document.getElementById('truck-panel-sub');
+    if (sub) sub.textContent = (data.active_16ft||0)+' × 16ft · '+(data.active_21ft||0)+' × 21ft · '+(data.oos_count||0)+' OOS';
+  } catch(e) {
+    console.warn('loadFleetStatus error:', e);
+  }
+}
+
+function _renderFleetRows(fleet) {
+  const container = document.getElementById('truck-fleet-rows');
+  if (!container) return;
+  if (!fleet.length) { container.innerHTML = '<div style="padding:24px 20px;font-size:12px;color:var(--muted)">No fleet data.</div>'; return; }
+
+  const rows = fleet.map(function(t) {
+    const isOos    = t.status === 'OOS';
+    const sizePill = t.size === '21ft'
+      ? '<span style="font-size:9px;font-weight:700;color:#0369a1;background:#e0f2fe;padding:1px 5px">21FT</span>'
+      : '<span style="font-size:9px;font-weight:700;color:#374151;background:#f3f4f6;padding:1px 5px">16FT</span>';
+    const cdlTag  = t.cdl ? '<span style="font-size:9px;color:#6b7280">CDL</span>' : '—';
+    const oosBadge = isOos
+      ? '<span style="font-size:9px;font-weight:700;color:#b91c1c;background:#fee2e2;padding:1px 6px">OOS'+(t.oos_start?' '+t.oos_start:'')+(t.oos_end?'–'+t.oos_end:'')+'</span> '
+      : '';
+    const flights  = (t.current_flights||[]).length
+      ? '<span style="font-family:monospace;font-size:11px;color:#374151">'+t.current_flights.map(function(f){return 'AA'+f;}).join(', ')+'</span>'
+      : '<span style="font-size:11px;color:#9ca3af">—</span>';
+    const avail    = t.available_from && t.available_from !== '00:00'
+      ? t.available_from : '<span style="color:#16a34a">Now</span>';
+    const oosBtn   = isOos
+      ? '<button onclick="restoreTruck(\''+_esc(t.truck_id)+'\')" style="font-size:10px;font-weight:600;color:#16a34a;background:none;border:1px solid #bbf7d0;padding:3px 8px;cursor:pointer;font-family:inherit">Restore</button>'
+      : '<button onclick="quickOosTruck(\''+_esc(t.truck_id)+'\')" style="font-size:10px;font-weight:600;color:#b91c1c;background:none;border:1px solid #fecaca;padding:3px 8px;cursor:pointer;font-family:inherit">OOS</button>';
+
+    const rowBg = isOos ? 'background:#fff5f5;' : '';
+    return '<div style="display:grid;grid-template-columns:70px 44px 36px 1fr 80px 80px;gap:8px;align-items:center;padding:7px 20px;border-bottom:1px solid #f3f4f6;font-size:12px;'+rowBg+'">'
+      +'<span style="font-family:monospace;font-weight:700;color:#111">'+_esc(t.truck_id)+'</span>'
+      +sizePill
+      +cdlTag
+      +'<div>'+oosBadge+flights+'</div>'
+      +'<span style="font-size:11px;color:#6b7280;font-family:monospace">'+avail+'</span>'
+      +oosBtn
+      +'</div>';
+  }).join('');
+
+  container.innerHTML = rows;
+}
+
+function _populateTruckSelects(fleet) {
+  // OOS select — show all active trucks
+  const oosSel = document.getElementById('oos-truck-select');
+  if (oosSel) {
+    oosSel.innerHTML = '<option value="">Select truck…</option>';
+    fleet.filter(function(t){ return t.status === 'ACTIVE'; }).forEach(function(t) {
+      const opt = document.createElement('option');
+      opt.value = t.truck_id;
+      opt.textContent = t.truck_id + ' (' + t.size + (t.cdl ? ', CDL' : '') + ')';
+      oosSel.appendChild(opt);
+    });
+  }
+  // Swap select — all active trucks
+  const swapSel = document.getElementById('swap-new-truck');
+  if (swapSel) {
+    swapSel.innerHTML = '<option value="">Select replacement…</option>';
+    fleet.filter(function(t){ return t.status === 'ACTIVE'; }).forEach(function(t) {
+      const opt = document.createElement('option');
+      opt.value = t.truck_id;
+      opt.textContent = t.truck_id + ' (' + t.size + (t.cdl ? ', CDL' : '') + ')' + (t.available_from && t.available_from!=='00:00' ? ' — free '+t.available_from : ' — available now');
+      swapSel.appendChild(opt);
+    });
+  }
+}
+
+// Quick OOS from fleet table row — opens OOS tab pre-filled
+function quickOosTruck(truckId) {
+  switchTruckTab('oos');
+  const sel = document.getElementById('oos-truck-select');
+  if (sel) sel.value = truckId;
+}
+
+async function restoreTruck(truckId) {
+  const sid = sessionId || (scheduleData && scheduleData.session_id);
+  if (!sid) return;
+  try {
+    const r = await fetch('/api/live/event/truck-restore', {
+      method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token': window._authToken||''},
+      body: JSON.stringify({session_id: sid, truck_id: truckId})
+    });
+    const data = await r.json();
+    if (data.error) { alert('Restore failed: ' + data.error); return; }
+    showToast(data.log || (truckId + ' restored'));
+    await loadFleetStatus();
+    _refreshFleetKpis();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function submitTruckOos() {
+  const sid = sessionId || (scheduleData && scheduleData.session_id);
+  if (!sid) return;
+  const truckId  = document.getElementById('oos-truck-select').value;
+  const oosStart = document.getElementById('oos-start-time').value || null;
+  const oosEnd   = document.getElementById('oos-end-time').value   || null;
+  const reason   = document.getElementById('oos-reason').value.trim();
+  const resDiv   = document.getElementById('truck-oos-result');
+
+  if (!truckId) { alert('Select a truck.'); return; }
+
+  resDiv.style.display = 'none';
+  try {
+    const r = await fetch('/api/live/event/truck-oos', {
+      method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token': window._authToken||''},
+      body: JSON.stringify({session_id: sid, truck_id: truckId, oos_start: oosStart, oos_end: oosEnd, reason})
+    });
+    const data = await r.json();
+    if (data.error) {
+      resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:8px 0">'+_esc(data.error)+'</div>';
+      resDiv.style.display = ''; return;
+    }
+
+    // Build result summary
+    var lines = ['<div style="font-size:12px">'];
+    lines.push('<div style="font-weight:700;color:#166534;margin-bottom:6px">✓ '+_esc(truckId)+' marked OOS'+(oosEnd?' until '+oosEnd:' all-day')+'</div>');
+    if (data.auto_swapped && data.auto_swapped.length) {
+      lines.push('<div style="margin-bottom:4px;color:#374151">Auto-swapped '+data.auto_swapped.length+' run(s):</div>');
+      data.auto_swapped.forEach(function(s) {
+        lines.push('<div style="padding:2px 0;font-family:monospace;font-size:11px;color:#374151">  '
+          +_esc(s.old_truck)+' → '+_esc(s.new_truck)+' ('+_esc(s.new_size||'')+') — '
+          +(s.flights||[]).map(function(f){return 'AA'+f;}).join(', ')+'</div>');
+      });
+    }
+    if (data.manual_required && data.manual_required.length) {
+      lines.push('<div style="margin-top:6px;color:#b91c1c;font-weight:600">⚠ '+data.manual_required.length+' run(s) need manual truck assignment:</div>');
+      data.manual_required.forEach(function(m) {
+        lines.push('<div style="font-family:monospace;font-size:11px;color:#b91c1c">  '
+          +(m.flights||[]).map(function(f){return 'AA'+f;}).join(', ')
+          +(m.needs_21ft?' (requires 21ft)':'')+'</div>');
+      });
+    }
+    lines.push('</div>');
+    resDiv.innerHTML = lines.join('');
+    resDiv.style.display = '';
+
+    // Refresh fleet panel + dispatch board KPIs
+    if (data.result) {
+      scheduleData = data.result;
+      if (typeof renderResults === 'function') renderResults(data.result);
+    }
+    await loadFleetStatus();
+    _refreshFleetKpis();
+
+    // Clear form
+    document.getElementById('oos-truck-select').value = '';
+    document.getElementById('oos-start-time').value = '';
+    document.getElementById('oos-end-time').value = '';
+    document.getElementById('oos-reason').value = '';
+  } catch(e) {
+    resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px">Error: '+_esc(e.message)+'</div>';
+    resDiv.style.display = '';
+  }
+}
+
+async function previewTruckSwap() {
+  const flightNum = document.getElementById('swap-flight-num').value.trim().replace(/^AA/i,'');
+  const infoDiv   = document.getElementById('swap-flight-info');
+  if (!flightNum || !scheduleData) { infoDiv.style.display='none'; return; }
+
+  // Find flight in current schedule data
+  const assignments = (scheduleData.assignments || []);
+  const op = assignments.find(function(a){ return String(a.flight) === String(flightNum); });
+  if (!op) { infoDiv.style.display='none'; return; }
+
+  // Build siblings (same run_id)
+  const runId = op.run_id;
+  const siblings = runId
+    ? assignments.filter(function(a){ return a.run_id === runId; })
+    : [op];
+  const currentTruck = op.truck_id || '—';
+  const sizeReq      = op.truck_size_required || 'any';
+  const flightList   = siblings.map(function(s){return 'AA'+s.flight;}).join(', ');
+
+  infoDiv.innerHTML = '<div style="display:flex;flex-direction:column;gap:3px">'
+    +'<div><strong>Current truck:</strong> <span style="font-family:monospace">'+_esc(currentTruck)+'</span>'
+    +(op.truck_size ? ' ('+_esc(op.truck_size)+')' : '')+'</div>'
+    +'<div><strong>Run:</strong> <span style="font-family:monospace">'+_esc(flightList)+'</span>'
+    +(op.team ? ' — '+_esc(op.team) : '')+'</div>'
+    +(sizeReq==='21ft' ? '<div style="color:#0369a1;font-size:11px">⚠ WB INTL — replacement must be 21ft</div>' : '')
+    +'</div>';
+  infoDiv.style.display = '';
+
+  // Filter swap select to compatible trucks
+  const fleet = (window._fleetStatus && window._fleetStatus.fleet) || [];
+  const swapSel = document.getElementById('swap-new-truck');
+  swapSel.innerHTML = '<option value="">Select replacement…</option>';
+  fleet.filter(function(t){
+    if (t.status !== 'ACTIVE') return false;
+    if (t.truck_id === currentTruck) return false;
+    if (sizeReq === '21ft' && t.size !== '21ft') return false;
+    return true;
+  }).forEach(function(t) {
+    const opt = document.createElement('option');
+    opt.value = t.truck_id;
+    opt.textContent = t.truck_id + ' (' + t.size + (t.cdl?', CDL':'') + ')'
+      + (t.available_from && t.available_from!=='00:00' ? ' — free '+t.available_from : ' — available now');
+    swapSel.appendChild(opt);
+  });
+}
+
+async function submitTruckSwap() {
+  const sid       = sessionId || (scheduleData && scheduleData.session_id);
+  if (!sid) return;
+  const flightNum  = document.getElementById('swap-flight-num').value.trim().replace(/^AA/i,'');
+  const newTruck   = document.getElementById('swap-new-truck').value;
+  const resDiv     = document.getElementById('truck-swap-result');
+
+  if (!flightNum) { alert('Enter a flight number.'); return; }
+  if (!newTruck)  { alert('Select a replacement truck.'); return; }
+
+  resDiv.style.display = 'none';
+  try {
+    const r = await fetch('/api/live/event/truck-swap', {
+      method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token': window._authToken||''},
+      body: JSON.stringify({session_id: sid, flight_num: flightNum, new_truck_id: newTruck})
+    });
+    const data = await r.json();
+    if (data.error) {
+      resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:8px 0">'+_esc(data.error)+'</div>';
+      resDiv.style.display=''; return;
+    }
+
+    resDiv.innerHTML = '<div style="font-size:12px;color:#166534;font-weight:700;padding:8px 0">'
+      +'✓ Truck swapped: '+_esc(data.old_truck||'?')+' → '+_esc(data.new_truck||'')+' ('+_esc(data.new_size||'')+')<br>'
+      +'<span style="font-weight:400;color:#374151;font-family:monospace">Run: '
+      +(data.flights_in_run||[]).map(function(f){return 'AA'+f;}).join(', ')+'</span></div>';
+    resDiv.style.display = '';
+
+    if (data.result) {
+      scheduleData = data.result;
+      if (typeof renderResults === 'function') renderResults(data.result);
+    }
+    await loadFleetStatus();
+    _refreshFleetKpis();
+
+    // Clear form
+    document.getElementById('swap-flight-num').value = '';
+    document.getElementById('swap-new-truck').innerHTML = '<option value="">Select replacement…</option>';
+    document.getElementById('swap-flight-info').style.display = 'none';
+  } catch(e) {
+    resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px">Error: '+_esc(e.message)+'</div>';
+    resDiv.style.display='';
+  }
+}
+
+function _refreshFleetKpis() {
+  // Re-render dispatch board if it's visible to pick up new fleet KPI strip
+  const dbRoot = document.getElementById('dispatch-board-root');
+  if (dbRoot && dbRoot.innerHTML && window.__dispatchModel) {
+    if (typeof renderDispatchBoard === 'function' && scheduleData) {
+      renderDispatchBoard(scheduleData);
+    }
+  }
+}
+
+// Small helper — used throughout (may already exist; safe redefinition)
+function _esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function showToast(msg) {
+  var t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 20px;font-size:12px;border-radius:4px;z-index:9999;pointer-events:none';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 3000);
 }
 
 function populateLiveOpsDropdowns(data) {
@@ -3451,14 +3763,28 @@ function buildTeamCard(t) {
   // Header colour class
   const hdrCls = ttype==='OVERNIGHT' ? 'ovn' : ttype==='PT' ? 'pt' : '';
 
+  // Collect distinct trucks for this team (across all runs)
+  const teamTrucks = [...new Set(ops.map(o => o.truck_id).filter(Boolean))];
+  const truckStat = teamTrucks.length
+    ? teamTrucks.map(tr => {
+        const sz = ops.find(o => o.truck_id === tr)?.truck_size || '';
+        const is21 = sz === '21ft';
+        return `<span style="font-family:var(--mono);font-size:11px;font-weight:700;`
+          + (is21 ? 'color:#0369a1' : 'color:var(--text2)') + `">${tr}</span>`
+          + (sz ? `<span style="font-size:9px;color:var(--muted);margin-left:2px">${sz}</span>` : '');
+      }).join(' <span style="color:var(--muted)">·</span> ')
+    : '—';
+
   // Per-flight rows — group by dispatch_min to assign run numbers
   let rows = '';
   let runNum = 0;
   let lastDispatch = null;
+  let lastRunTruck = null;   // track truck shown for this run
   ops.forEach((op, idx) => {
     const dispKey = op.dispatch_min || op.dispatch || '';
-    if (dispKey !== lastDispatch) { runNum++; lastDispatch = dispKey; }
-    const sameRun = idx > 0 && (ops[idx-1].dispatch_min || ops[idx-1].dispatch || '') === dispKey;
+    const isNewRun = dispKey !== lastDispatch;
+    if (isNewRun) { runNum++; lastDispatch = dispKey; lastRunTruck = null; }
+    const sameRun = idx > 0 && !isNewRun;
 
     // Buffer between runs
     const prev = idx > 0 ? ops[idx-1] : null;
@@ -3495,6 +3821,20 @@ function buildTeamCard(t) {
     const noseCell = op.nose
       ? `<span style="font-weight:700;font-family:var(--mono)">${op.nose}</span>` : '—';
 
+    // Truck cell — show on first flight of each run only, muted dot for subsequent stops
+    let truckCell = '';
+    const trk = op.truck_id;
+    if (isNewRun && trk) {
+      const trkSz   = op.truck_size || '';
+      const is21ft  = trkSz === '21ft';
+      const trkColor = is21ft ? '#0369a1' : 'var(--text2)';
+      truckCell = `<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:${trkColor}">${trk}</span>`
+        + (trkSz ? `<br><span style="font-size:9px;color:var(--muted)">${trkSz}</span>` : '');
+      lastRunTruck = trk;
+    } else if (sameRun) {
+      truckCell = `<span style="font-size:10px;color:var(--muted)">↑</span>`;
+    }
+
     rows += `<tr class="${rowCls}" data-flight="${op.flight}" data-dest="${op.dest||''}">
       <td class="stop-num"><span style="${runNumStyle}">${runNum}</span></td>
       <td class="fn" style="color:var(--accent)">${op.flight}</td>
@@ -3506,6 +3846,7 @@ function buildTeamCard(t) {
       <td style="color:var(--muted)">${op.dispatch||'—'}</td>
       <td>${op.svc_start||'—'} <span style="color:var(--muted)">→</span> ${op.svc_end||'—'}</td>
       <td style="font-size:11px">${noseCell}</td>
+      <td style="white-space:nowrap;line-height:1.3">${truckCell}</td>
       <td><button class="run-stop-remove" onclick="openRunEditor('${t.team_id}','${op.flight}',event)" style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 8px">Edit</button></td>
     </tr>`;
 
@@ -3559,6 +3900,10 @@ function buildTeamCard(t) {
           <span class="tdc-stat-val">${lastStd}</span>
           <span class="tdc-stat-lbl">Last STD</span>
         </div>
+        <div class="tdc-stat" title="Assigned truck(s) for this team">
+          <span class="tdc-stat-val" style="font-size:12px">${truckStat}</span>
+          <span class="tdc-stat-lbl">Truck</span>
+        </div>
       </div>
     </div>
     <table class="tdc-table">
@@ -3573,6 +3918,7 @@ function buildTeamCard(t) {
         <th>Dispatch</th>
         <th>Service Window</th>
         <th>Nose</th>
+        <th>Truck</th>
         <th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
@@ -3902,7 +4248,7 @@ function renderResults(data) {
   // Enable Live Ops buttons for managers/supervisors on any loaded schedule
   const role = currentUser ? currentUser.role : 'agent';
   if (role === 'manager' || role === 'supervisor' || role === 'admin') {
-    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-truck','btn-export'].forEach(id => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = false;
     });
@@ -4726,7 +5072,25 @@ function _dbStyles() {
   /* ─── Buttons ─── */
   +'.db-action-row{display:flex;gap:8px;padding:12px var(--db-px)}'  +'.db-btn{padding:6px 14px;border:1px solid var(--db-border);background:var(--db-surface);font-size:12px;cursor:pointer;font-family:inherit;color:var(--db-text);line-height:1.4}'  +'.db-btn:hover{background:var(--db-surface2)}'  +'.db-btn-primary{background:var(--db-blue);color:#fff;border-color:var(--db-blue)}'  +'.db-btn-primary:hover{opacity:.9}'  +'.db-btn-success{color:var(--db-green);border-color:#d1fae5}'  +'.db-btn-success:hover{background:#f0fdf4}'  +'.db-btn-danger{color:var(--db-red);border-color:#fecaca}'  +'.db-btn-danger:hover{background:#fff5f5}'
   /* ─── Misc ─── */
-  +'.db-empty{font-size:12px;color:var(--db-muted);padding:24px var(--db-px)}'  +'.db-pill{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}'  +'.db-pill-review{color:var(--db-red)}'  +'.db-pill-done,.db-pill-alerted{color:var(--db-green)}'  +'.db-pill-fh,.db-pill-alert{color:var(--db-amber)}'  +'.db-pill-manual,.db-pill-auto{color:var(--db-muted)}'  +'@media(max-width:1100px){.db-wrap{grid-template-columns:1fr}.db-summary{grid-template-columns:repeat(3,1fr)}}'  +'</style>';
+  +'.db-empty{font-size:12px;color:var(--db-muted);padding:24px var(--db-px)}'  +'.db-pill{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}'  +'.db-pill-review{color:var(--db-red)}'  +'.db-pill-done,.db-pill-alerted{color:var(--db-green)}'  +'.db-pill-fh,.db-pill-alert{color:var(--db-amber)}'  +'.db-pill-manual,.db-pill-auto{color:var(--db-muted)}'  +'@media(max-width:1100px){.db-wrap{grid-template-columns:1fr}.db-summary{grid-template-columns:repeat(3,1fr)}}'
+  /* ─── Fleet strip ─── */
+  +'.db-fleet-strip{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--db-border);background:var(--db-surface2);padding:0 var(--db-px)}'
+  +'.db-fleet-tile{display:flex;flex-direction:column;padding:8px 16px 8px 0;margin-right:16px;border-right:1px solid var(--db-border2)}'
+  +'.db-fleet-v{font-size:20px;font-weight:600;font-family:var(--db-mono);color:var(--db-text);line-height:1}'
+  +'.db-fleet-l{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--db-muted);margin-top:3px;font-weight:500}'
+  +'.db-fleet-oos-list{font-size:11px;font-family:var(--db-mono);color:var(--db-red);padding:0 12px;flex:1}'
+  +'.db-fleet-btn{margin-left:auto;font-size:11px;font-weight:600;color:#0369a1;background:none;border:1px solid #bae6fd;padding:5px 12px;cursor:pointer;font-family:inherit;white-space:nowrap}'
+  +'.db-fleet-btn:hover{background:#f0f9ff}'
+  /* ─── Truck panel overlay ─── */
+  +'.db-truck-pill-21{font-size:9px;font-weight:700;color:#0369a1;letter-spacing:.04em;text-transform:uppercase;background:#e0f2fe;padding:1px 5px}'
+  +'.db-truck-pill-16{font-size:9px;font-weight:700;color:#374151;letter-spacing:.04em;text-transform:uppercase;background:#f3f4f6;padding:1px 5px}'
+  +'.db-truck-pill-oos{font-size:9px;font-weight:700;color:var(--db-red);letter-spacing:.04em;text-transform:uppercase;background:#fee2e2;padding:1px 5px}'
+  +'.db-truck-row{display:grid;grid-template-columns:70px 44px 36px 1fr auto auto;align-items:center;gap:8px;padding:7px var(--db-px);border-bottom:1px solid var(--db-border2);font-size:12px}'
+  +'.db-truck-row:hover{background:var(--db-surface2)}'
+  +'.db-truck-id{font-family:var(--db-mono);font-weight:700;color:var(--db-text)}'
+  +'.db-truck-flights{font-size:11px;color:var(--db-muted);font-family:var(--db-mono)}'
+  +'.db-truck-avail{font-size:10px;color:var(--db-muted)}'
+  +'</style>';
 }
 
 function _dbRenderEventCards(events) {
@@ -5041,6 +5405,21 @@ function renderDispatchBoard(data) {
     return '<div class="db-kpi"><div class="v" style="'+k[2]+'">'+k[0]+'</div><div class="l">'+k[1]+'</div></div>';
   }).join('');
 
+  // Fleet KPI strip — injected after main KPIs
+  var fleetKpis = '';
+  if (window._fleetStatus) {
+    var fs = window._fleetStatus;
+    var oosColor = (fs.oos_count||0) > 0 ? 'color:#dc2626' : '';
+    fleetKpis = '<div class="db-fleet-strip">'
+      +'<div class="db-fleet-tile"><span class="db-fleet-v">'+((fs.active_16ft||0)+(fs.active_21ft||0))+'</span><span class="db-fleet-l">Active Trucks</span></div>'
+      +'<div class="db-fleet-tile"><span class="db-fleet-v">'+((fs.active_16ft||0))+'</span><span class="db-fleet-l">16ft</span></div>'
+      +'<div class="db-fleet-tile"><span class="db-fleet-v">'+((fs.active_21ft||0))+'</span><span class="db-fleet-l">21ft</span></div>'
+      +'<div class="db-fleet-tile"><span class="db-fleet-v" style="'+oosColor+'">'+(fs.oos_count||0)+'</span><span class="db-fleet-l">OOS</span></div>'
+      +(fs.oos_list && fs.oos_list.length ? '<div class="db-fleet-oos-list">OOS: '+(fs.oos_list||[]).join(', ')+'</div>' : '')
+      +'<button class="db-fleet-btn" onclick="openTruckPanel()">Manage Fleet →</button>'
+      +'</div>';
+  }
+
   var firstDetail = model.events.length
     ? _dbRenderDetailPanel(model.events[0], model)
     : '<div class="db-empty">Select an event or click a REVIEW pill to see options.</div>';
@@ -5050,6 +5429,7 @@ function renderDispatchBoard(data) {
   root.innerHTML = _dbStyles()
     +'<div class="db-frame">'
     +'<div class="db-summary">'+kpis+'</div>'
+    +(fleetKpis)
     +(model.issues.length ? '<div class="db-action-banner">'+_dbRenderIssuesBanner(model.issues, model)+'</div>' : '')
     +'<div class="db-wrap">'
     +'<div class="db-col-log" style="max-height:78vh;overflow-y:auto">'
@@ -6085,39 +6465,44 @@ function loadSavedSchedule(date, shift) {
   var token = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY);
   if (!token) return;
   sessionId = null;
+  var loadShift = 'combined';
 
-  // Try combined → morning → afternoon
-  // Confirm saves as 'morning' due to daily_schedules_shift_check constraint
-  var shiftsToTry = ['combined', 'morning', 'afternoon'];
-  var shiftIdx = 0;
-
-  function tryNext() {
-    if (shiftIdx >= shiftsToTry.length) {
+  fetch('/api/daily/' + date + '/' + loadShift, {
+    headers: {'X-Auth-Token': token}
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if (data.error) { console.warn('loadSavedSchedule:', data.error); return; }
+    if (!data.found) {
+      // ── No confirmed schedule for this date ────────────────────────────
+      // Render only reads from daily_schedules (confirmed schedules).
+      // Sessions are the Mac's working draft — not shown here.
       var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
       _showOpsDatePicker(date, token, opsOnly);
       return;
     }
-    var s = shiftsToTry[shiftIdx++];
-    fetch('/api/daily/' + date + '/' + s, { headers: {'X-Auth-Token': token} })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.error || !data.found) { tryNext(); return; }
-        window._currentShift   = 'combined';
-        window._scheduleDate   = date;
-        window._scheduleStatus = data.status;
-        fullScheduleData = data;
-        scheduleData     = data;
-        currentView      = 'full';
-        window._scheduleDay = data.day_of_week || window._scheduleDay;
-        renderResults(data);
-        populateLiveOpsDropdowns(data);
-        var sb = document.getElementById('sidebar');
-        if (sb && !sb.classList.contains('collapsed')) { collapseSidebar(data); }
-        startPolling(date, 'combined');
-      })
-      .catch(function() { tryNext(); });
-  }
-  tryNext();
+    // Schedule found — render it
+    window._currentShift  = 'combined';
+    window._scheduleDate  = date;
+    window._scheduleStatus = data.status;
+    fullScheduleData = data;   // store full for view switching
+    scheduleData = data;
+    currentView = 'full';
+    window._scheduleDay = data.day_of_week || window._scheduleDay;
+    renderResults(data);
+    populateLiveOpsDropdowns(data);
+
+    // Fetch fleet status in background
+    setTimeout(function() { if (typeof loadFleetStatus === 'function') loadFleetStatus(); }, 200);
+
+    // Collapse sidebar so main gets full width
+    var sb = document.getElementById('sidebar');
+    if (sb && !sb.classList.contains('collapsed')) { collapseSidebar(data); }
+
+    // Start polling for live updates
+    startPolling(date, 'combined');
+  })
+  .catch(function(e){ console.warn('loadSavedSchedule error:', e); });
 }
 
 // ── Role-based boot after login ───────────────────────────────────────────
@@ -7488,6 +7873,100 @@ applySession = function(user) {
       style="width:36px;height:36px;border-radius:50%;background:#2563eb;color:#fff;border:none;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">&#10148;</button>
   </div>
 </div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     FLEET MANAGEMENT PANEL — Truck OOS / Swap / Status
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="op-modal" id="modal-truck">
+  <div class="op-panel" style="width:min(760px,97vw);padding:0;overflow:hidden">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--surface2)">
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text)">Fleet Management</div>
+        <div id="truck-panel-sub" style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px">Loading fleet status…</div>
+      </div>
+      <button onclick="closeTruckPanel()" style="background:none;border:none;font-size:20px;color:var(--muted);cursor:pointer;padding:4px;line-height:1">&times;</button>
+    </div>
+
+    <!-- Tab bar -->
+    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--surface)">
+      <button id="truck-tab-fleet"  class="truck-tab truck-tab-active" onclick="switchTruckTab('fleet')">Fleet Status</button>
+      <button id="truck-tab-oos"    class="truck-tab"                  onclick="switchTruckTab('oos')">Mark OOS</button>
+      <button id="truck-tab-swap"   class="truck-tab"                  onclick="switchTruckTab('swap')">Swap Truck</button>
+    </div>
+
+    <!-- Tab: Fleet Status -->
+    <div id="truck-pane-fleet" style="max-height:60vh;overflow-y:auto">
+      <div style="display:grid;grid-template-columns:70px 44px 36px 1fr 80px 80px;gap:8px;padding:6px 20px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface2)">
+        <span>Truck</span><span>Size</span><span>CDL</span><span>Flights / Next Free</span><span>Avail At</span><span>Action</span>
+      </div>
+      <div id="truck-fleet-rows">
+        <div style="padding:24px 20px;font-size:12px;color:var(--muted)">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Tab: Mark OOS -->
+    <div id="truck-pane-oos" style="display:none;padding:20px">
+      <div class="op-field">
+        <label>Truck</label>
+        <select id="oos-truck-select">
+          <option value="">Select truck…</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="op-field">
+          <label>OOS Start (leave blank = start of day)</label>
+          <input type="time" id="oos-start-time" placeholder="HH:MM">
+        </div>
+        <div class="op-field">
+          <label>OOS End (leave blank = all-day)</label>
+          <input type="time" id="oos-end-time" placeholder="HH:MM">
+        </div>
+      </div>
+      <div class="op-field">
+        <label>Reason (optional)</label>
+        <input type="text" id="oos-reason" placeholder="e.g. mechanical, maintenance, damage">
+      </div>
+      <div id="truck-oos-result" style="display:none;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-solve" style="flex:1;padding:10px" onclick="submitTruckOos()">Mark OOS</button>
+        <button class="btn-cancel" style="padding:10px 20px" onclick="closeTruckPanel()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Tab: Swap Truck -->
+    <div id="truck-pane-swap" style="display:none;padding:20px">
+      <div class="op-field">
+        <label>Flight Number (any flight in the run to swap)</label>
+        <input type="text" id="swap-flight-num" placeholder="e.g. 423" oninput="previewTruckSwap()">
+      </div>
+      <div id="swap-flight-info" style="display:none;margin-bottom:12px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);font-size:12px"></div>
+      <div class="op-field">
+        <label>Replace With</label>
+        <select id="swap-new-truck">
+          <option value="">Select replacement truck…</option>
+        </select>
+      </div>
+      <div id="truck-swap-result" style="display:none;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-solve" style="flex:1;padding:10px" onclick="submitTruckSwap()">Swap Truck</button>
+        <button class="btn-cancel" style="padding:10px 20px" onclick="closeTruckPanel()">Cancel</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+.truck-tab {
+  padding:10px 16px;font-size:11px;font-weight:600;color:var(--muted);
+  background:none;border:none;cursor:pointer;font-family:var(--sans);
+  border-bottom:2px solid transparent;letter-spacing:.02em;
+}
+.truck-tab:hover { color:var(--text); }
+.truck-tab-active { color:var(--accent);border-bottom-color:var(--accent); }
+</style>
 
 </body>
 </html>
