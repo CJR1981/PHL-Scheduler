@@ -622,6 +622,24 @@
   .tdc-stat-lbl { font-size:9px; color:var(--muted); text-transform:uppercase;
     letter-spacing:.07em; display:block; margin-top:2px;
     font-family:-apple-system,sans-serif; font-weight:600; }
+  .tdc-left { display:flex; align-items:center; gap:0; }
+  .tdc-divider { width:1px; height:38px; background:var(--border); margin:0 14px; flex-shrink:0; }
+  .tdc-truck-block { display:flex; flex-direction:column; justify-content:center; }
+  .tdc-truck-num { font-size:18px; font-weight:700; font-family:var(--mono);
+    color:var(--text); letter-spacing:.02em; line-height:1.15; }
+  .tdc-truck-sub { font-size:10px; color:var(--muted); font-family:-apple-system,sans-serif;
+    margin-top:1px; letter-spacing:.03em; }
+  .tdc-keycafe { display:flex; flex-direction:column; align-items:center;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:6px; padding:5px 12px; min-width:110px; }
+  .tdc-keycafe-lbl { font-size:9px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.08em; font-family:-apple-system,sans-serif; font-weight:700; }
+  .tdc-keycafe-code { font-size:19px; font-weight:700; font-family:var(--mono);
+    letter-spacing:.2em; color:var(--text); line-height:1.3; }
+  .tdc-keycafe-window { font-size:9px; color:var(--muted); font-family:-apple-system,sans-serif;
+    margin-top:1px; letter-spacing:.02em; }
+  .tdc-keycafe.pending .tdc-keycafe-code { font-size:11px; color:var(--muted);
+    letter-spacing:.04em; font-weight:400; }
   .tdc-table { width:100%; border-collapse:collapse; font-size:12px; table-layout:auto; }
   .tdc-table th { background:var(--surface2); color:var(--muted); padding:6px 10px;
     text-align:left; font-size:10px; font-weight:700;
@@ -3435,26 +3453,51 @@ function buildTeamCard(t) {
   const firstStd = ops[0]?.std || '—';
   const lastStd  = ops[ops.length-1]?.std || '—';
 
-  // Time span (first dispatch to last svc_end)
-  let spanStr = '—';
-  if (ops.length > 1) {
-    const first = ops[0].dispatch_min || 0;
-    const last  = (ops[ops.length-1].svc_end_min || ops[ops.length-1].dispatch_min || 0);
-    const spanMin = last - first;
-    if (spanMin > 0) spanStr = `${(spanMin/60).toFixed(1)} h`;
-  }
+  // Primary truck — first op with a truck_id
+  const primaryTruckOp = ops.find(o => o.truck_id) || null;
+  const truckId   = primaryTruckOp?.truck_id || t.truck_id || '';
+  const truckSize = primaryTruckOp?.truck_size || primaryTruckOp?.truck_height || '';
+  const truckSub  = [truckSize, 'truck'].filter(Boolean).join(' · ');
 
-  // Buffers between consecutive svc_end → next dispatch
-  const buffers = [];
-  for (let i = 1; i < ops.length; i++) {
-    const prevFree = ops[i-1].team_free_min || (ops[i-1].svc_end_min||0);
-    const nextDisp = ops[i].dispatch_min || 0;
-    const gap = nextDisp - prevFree;
-    buffers.push(gap);
-  }
-  const avgBuf = buffers.length ? Math.round(buffers.reduce((a,b)=>a+b,0)/buffers.length) : null;
-  const minBuf = buffers.length ? Math.min(...buffers) : null;
-  const minBufClass = minBuf === null ? '' : minBuf < 10 ? 'red' : minBuf < 20 ? 'warn' : 'good';
+  // Keycafe validity window = shift start → shift end + 1hr
+  const keycafeCode = t.keycafe_code || null;
+  const keycafeWindow = (() => {
+    if (!t.shift) return '';
+    const parts = t.shift.replace('\u2013','-').replace('\u2014','-').split('-');
+    if (parts.length < 2) return '';
+    const start = parts[0].trim();
+    const endParts = parts[1].trim().split(':');
+    if (endParts.length < 2) return `${start}\u2013${parts[1].trim()}`;
+    const endH = parseInt(endParts[0], 10);
+    const endM = parseInt(endParts[1], 10);
+    const bufH = Math.floor((endH * 60 + endM + 60) / 60) % 24;
+    const bufM = (endH * 60 + endM + 60) % 60;
+    const bufStr = `${String(bufH).padStart(2,'0')}:${String(bufM).padStart(2,'0')}`;
+    return `${start}\u2013${bufStr}`;
+  })();
+
+  const keycafeHtml = truckId ? (keycafeCode
+    ? `<div class="tdc-keycafe">
+         <span class="tdc-keycafe-lbl">Keycafe</span>
+         <span class="tdc-keycafe-code">${keycafeCode.toString().split('').join(' ')}</span>
+         <span class="tdc-keycafe-window">${keycafeWindow}</span>
+       </div>`
+    : `<div class="tdc-keycafe pending">
+         <span class="tdc-keycafe-lbl">Keycafe</span>
+         <span class="tdc-keycafe-code">pending</span>
+         <span class="tdc-keycafe-window">${keycafeWindow}</span>
+       </div>`)
+    : '';
+
+  const truckHtml = truckId
+    ? `<div class="tdc-divider"></div>
+       <div class="tdc-truck-block">
+         <span class="tdc-truck-num">${truckId}</span>
+         <span class="tdc-truck-sub">${truckSub || 'truck'}</span>
+       </div>
+       <div class="tdc-divider"></div>
+       ${keycafeHtml}`
+    : '';
 
   // Header colour class
   const hdrCls = ttype==='OVERNIGHT' ? 'ovn' : ttype==='PT' ? 'pt' : '';
@@ -3538,26 +3581,17 @@ function buildTeamCard(t) {
   return `
   <div class="tdc" id="tdc-${t.team_id}" data-team="${t.team_id}">
     <div class="tdc-header ${hdrCls}">
-      <div>
-        <div class="tdc-title">${t.team_id}</div>
-        <div class="tdc-shift">${ttype} · ${t.shift}</div>
+      <div class="tdc-left">
+        <div>
+          <div class="tdc-title">${t.team_id}</div>
+          <div class="tdc-shift">${ttype} · ${t.shift}</div>
+        </div>
+        ${truckHtml}
       </div>
       <div class="tdc-stats">
         <div class="tdc-stat">
           <span class="tdc-stat-val">${fc}/${t.cap}</span>
           <span class="tdc-stat-lbl">Flights</span>
-        </div>
-        <div class="tdc-stat">
-          <span class="tdc-stat-val">${spanStr}</span>
-          <span class="tdc-stat-lbl">Span</span>
-        </div>
-        <div class="tdc-stat">
-          <span class="tdc-stat-val ${minBufClass}">${minBuf !== null ? minBuf+'m' : '—'}</span>
-          <span class="tdc-stat-lbl">Min Buffer</span>
-        </div>
-        <div class="tdc-stat">
-          <span class="tdc-stat-val">${avgBuf !== null ? avgBuf+'m' : '—'}</span>
-          <span class="tdc-stat-lbl">Avg Buffer</span>
         </div>
         <div class="tdc-stat">
           <span class="tdc-stat-val">${firstStd}</span>
