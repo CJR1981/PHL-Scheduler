@@ -531,8 +531,6 @@
   .btn-sick:hover  { border-color:var(--danger); color:var(--danger); }
   .btn-gate        { border-color:#d97706; color:#d97706; }
   .btn-gate:hover  { border-color:#b45309; color:#b45309; background:#fff7ed; }
-  .btn-truck       { border-color:#0369a1; color:#0369a1; }
-  .btn-truck:hover { border-color:#075985; color:#075985; background:#f0f9ff; }
   .btn-print { padding:6px 12px; border-radius:var(--radius); font-size:12px; font-weight:600;
     cursor:pointer; border:1px solid var(--border); background:var(--surface2);
     color:var(--text2); transition:all .15s; font-family:var(--sans); }
@@ -624,6 +622,24 @@
   .tdc-stat-lbl { font-size:9px; color:var(--muted); text-transform:uppercase;
     letter-spacing:.07em; display:block; margin-top:2px;
     font-family:-apple-system,sans-serif; font-weight:600; }
+  .tdc-left { display:flex; align-items:center; gap:0; }
+  .tdc-divider { width:1px; height:38px; background:var(--border); margin:0 14px; flex-shrink:0; }
+  .tdc-truck-block { display:flex; flex-direction:column; justify-content:center; }
+  .tdc-truck-num { font-size:18px; font-weight:700; font-family:var(--mono);
+    color:var(--text); letter-spacing:.02em; line-height:1.15; }
+  .tdc-truck-sub { font-size:10px; color:var(--muted); font-family:-apple-system,sans-serif;
+    margin-top:1px; letter-spacing:.03em; }
+  .tdc-keycafe { display:flex; flex-direction:column; align-items:center;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:6px; padding:5px 12px; min-width:110px; }
+  .tdc-keycafe-lbl { font-size:9px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.08em; font-family:-apple-system,sans-serif; font-weight:700; }
+  .tdc-keycafe-code { font-size:19px; font-weight:700; font-family:var(--mono);
+    letter-spacing:.2em; color:var(--text); line-height:1.3; }
+  .tdc-keycafe-window { font-size:9px; color:var(--muted); font-family:-apple-system,sans-serif;
+    margin-top:1px; letter-spacing:.02em; }
+  .tdc-keycafe.pending .tdc-keycafe-code { font-size:11px; color:var(--muted);
+    letter-spacing:.04em; font-weight:400; }
   .tdc-table { width:100%; border-collapse:collapse; font-size:12px; table-layout:auto; }
   .tdc-table th { background:var(--surface2); color:var(--muted); padding:6px 10px;
     text-align:left; font-size:10px; font-weight:700;
@@ -958,7 +974,6 @@ body.authenticated #login-screen { display: none !important; }
         <button class="btn-op btn-delay" id="btn-delay" onclick="openModal('delay')" disabled>Flight Delay</button>
         <button class="btn-op btn-gate"  id="btn-gate"  onclick="openGateChangeModal()" disabled>Gate Change</button>
         <button class="btn-op btn-move"  id="btn-move"  onclick="openModal('move')"  disabled>Reassign Flight</button>
-        <button class="btn-op btn-truck" id="btn-truck" onclick="openTruckPanel()"   disabled>Fleet</button>
         <span id="live-ops-hint" style="font-size:11px;color:var(--muted);margin-left:4px">
           Generate a schedule to enable
         </span>
@@ -1902,14 +1917,12 @@ async function runSchedule() {
     renderResults(data);
     populateLiveOpsDropdowns(data);
     // Enable live ops buttons now that we have a session
-    ['btn-sick','btn-delay','btn-gate','btn-move','btn-truck','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = false;
     });
     const hint = document.getElementById('live-ops-hint');
     if (hint) hint.style.display = 'none';
-    // Fetch fleet status in background (non-blocking)
-    setTimeout(function() { if (typeof loadFleetStatus === 'function') loadFleetStatus(); }, 200);
     // Collapse sidebar — no longer needed
     collapseSidebar(data);
   } catch(e) { showError('Error: ' + e.message); }
@@ -1974,469 +1987,6 @@ function closeModal(type) {
     const btn = document.getElementById('sick-confirm');
     btn.textContent = 'Remove Team & Reassign'; btn.disabled = false;
   }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// FLEET MANAGEMENT PANEL
-// ═══════════════════════════════════════════════════════════════════════════
-
-function openTruckPanel() {
-  if (!sessionId && !scheduleData) {
-    alert('Generate a schedule first to manage fleet.');
-    return;
-  }
-  const el = document.getElementById('modal-truck');
-  if (el) { el.style.display = 'flex'; }
-  switchTruckTab('fleet');
-  loadFleetStatus();
-}
-
-function closeTruckPanel() {
-  const el = document.getElementById('modal-truck');
-  if (el) el.style.display = 'none';
-  // Reset OOS tab
-  const oosS = document.getElementById('oos-truck-select');
-  if (oosS) oosS.value = '';
-  const oosStart = document.getElementById('oos-start-time');
-  if (oosStart) oosStart.value = '';
-  const oosEnd = document.getElementById('oos-end-time');
-  if (oosEnd) oosEnd.value = '';
-  const oosReason = document.getElementById('oos-reason');
-  if (oosReason) oosReason.value = '';
-  const oosRes = document.getElementById('truck-oos-result');
-  if (oosRes) { oosRes.style.display = 'none'; oosRes.innerHTML = ''; }
-  // Reset Swap tab
-  const swapFl = document.getElementById('swap-flight-num');
-  if (swapFl) swapFl.value = '';
-  const swapInfo = document.getElementById('swap-flight-info');
-  if (swapInfo) swapInfo.style.display = 'none';
-  const swapSel = document.getElementById('swap-new-truck');
-  if (swapSel) swapSel.innerHTML = '<option value="">Select replacement truck\u2026</option>';
-  const swapRes = document.getElementById('truck-swap-result');
-  if (swapRes) { swapRes.style.display = 'none'; swapRes.innerHTML = ''; }
-}
-
-function switchTruckTab(tab) {
-  ['fleet','oos','swap'].forEach(function(t) {
-    document.getElementById('truck-tab-'+t).className = 'truck-tab' + (t===tab ? ' truck-tab-active' : '');
-    document.getElementById('truck-pane-'+t).style.display = t===tab ? '' : 'none';
-  });
-}
-
-async function loadFleetStatus() {
-  const sid = sessionId || (scheduleData && scheduleData.session_id);
-  if (!sid) return;
-  const token = localStorage.getItem('phl_auth_token') || '';
-  try {
-    const r = await fetch('/api/trucks/status?session_id='+encodeURIComponent(sid), {
-      cache:'no-store',
-      headers: token ? {'X-Auth-Token': token} : {}
-    });
-    const data = await r.json();
-    if (data.error) { console.warn('Fleet status error:', data.error); return; }
-    window._fleetStatus = data;
-    _renderFleetRows(data.fleet || []);
-    _populateTruckSelects(data.fleet || []);
-    const sub = document.getElementById('truck-panel-sub');
-    if (sub) sub.textContent = (data.active_16ft||0)+' × 16ft · '+(data.active_21ft||0)+' × 21ft · '+(data.oos_count||0)+' OOS';
-  } catch(e) {
-    console.warn('loadFleetStatus error:', e);
-  }
-}
-
-function _renderFleetRows(fleet) {
-  const container = document.getElementById('truck-fleet-rows');
-  if (!container) return;
-  if (!fleet.length) {
-    container.innerHTML = '<div style="padding:24px 20px;font-size:12px;color:var(--muted)">No fleet data.</div>';
-    return;
-  }
-
-  // Build team→truck lookup from scheduleData if available
-  const teamTruckMap = {};
-  if (scheduleData && scheduleData.team_truck) {
-    Object.entries(scheduleData.team_truck).forEach(function(e) {
-      // e[0]=team, e[1]=truck → invert to truck→[teams]
-      if (!teamTruckMap[e[1]]) teamTruckMap[e[1]] = [];
-      teamTruckMap[e[1]].push(e[0]);
-    });
-  } else if (scheduleData && scheduleData.assignments) {
-    // Fallback: scan assignments
-    scheduleData.assignments.forEach(function(a) {
-      const tr = a.truck_id; const tm = a.team;
-      if (tr && tm) {
-        if (!teamTruckMap[tr]) teamTruckMap[tr] = [];
-        if (!teamTruckMap[tr].includes(tm)) teamTruckMap[tr].push(tm);
-      }
-    });
-  }
-
-  // Separate active vs OOS
-  const active = fleet.filter(function(t){ return t.status === 'ACTIVE'; });
-  const oos    = fleet.filter(function(t){ return t.status === 'OOS'; });
-
-  function buildRow(t) {
-    const isOos    = t.status === 'OOS';
-    const sizePill = t.size === '21ft'
-      ? '<span style="font-size:9px;font-weight:700;color:#0369a1;background:#e0f2fe;padding:1px 6px;border-radius:2px">21FT</span>'
-      : '<span style="font-size:9px;font-weight:700;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:2px">16FT</span>';
-    const cdlTag  = t.cdl
-      ? '<span style="font-size:9px;color:#6b7280;background:#f9fafb;border:1px solid #e5e7eb;padding:1px 5px;border-radius:2px">CDL</span>'
-      : '<span style="font-size:9px;color:#d1d5db">—</span>';
-
-    // OOS window display
-    const oosBadge = isOos
-      ? '<span style="font-size:9px;font-weight:700;color:#b91c1c;background:#fee2e2;padding:2px 6px;border-radius:2px">OOS'
-        +(t.oos_start?' '+t.oos_start:'')+(t.oos_end?'–'+t.oos_end:' all-day')+'</span> '
-      : '';
-
-    // Assigned team
-    const teams = teamTruckMap[t.truck_id] || [];
-    const teamDisplay = teams.length
-      ? '<span style="font-family:monospace;font-size:11px;color:#1d4ed8;font-weight:600">'+teams.join(', ')+'</span>'
-      : '<span style="font-size:11px;color:#9ca3af">—</span>';
-
-    // Current flights
-    const flts = (t.current_flights||[]);
-    const flightDisplay = flts.length
-      ? '<span style="font-family:monospace;font-size:10px;color:#374151">'
-        + flts.slice(0,4).map(function(f){return 'AA'+f;}).join(' ')
-        + (flts.length>4 ? ' +'+( flts.length-4)+'…' : '')
-        + '</span>'
-      : '';
-
-    const avail = t.available_from && t.available_from !== '00:00'
-      ? '<span style="font-size:11px;color:#6b7280;font-family:monospace">'+t.available_from+'</span>'
-      : '<span style="font-size:11px;color:#16a34a;font-weight:600">Now</span>';
-
-    const actionBtn = isOos
-      ? '<button onclick="restoreTruck(\''+_esc(t.truck_id)+'\')" '
-        +'style="font-size:10px;font-weight:600;color:#16a34a;background:none;border:1px solid #bbf7d0;'
-        +'padding:3px 10px;cursor:pointer;font-family:inherit;white-space:nowrap">Restore</button>'
-      : '<button onclick="quickOosTruck(\''+_esc(t.truck_id)+'\')" '
-        +'style="font-size:10px;font-weight:600;color:#b91c1c;background:none;border:1px solid #fecaca;'
-        +'padding:3px 10px;cursor:pointer;font-family:inherit;white-space:nowrap">Mark OOS</button>';
-
-    const rowBg = isOos ? 'background:#fff5f5;' : '';
-    const oosReason = isOos && t.oos_reason
-      ? '<div style="font-size:10px;color:#9ca3af;margin-top:1px">'+_esc(t.oos_reason)+'</div>' : '';
-
-    return '<div style="display:grid;grid-template-columns:72px 44px 36px 80px 1fr 70px 80px;'
-      +'gap:8px;align-items:center;padding:7px 20px;border-bottom:1px solid #f3f4f6;'+rowBg+'">'
-      +'<span style="font-family:monospace;font-weight:700;font-size:12px;color:#111">'+_esc(t.truck_id)+'</span>'
-      +sizePill
-      +cdlTag
-      +'<div>'+teamDisplay+'</div>'
-      +'<div>'+oosBadge+flightDisplay+oosReason+'</div>'
-      +avail
-      +actionBtn
-      +'</div>';
-  }
-
-  let html = '';
-
-  if (oos.length) {
-    html += '<div style="padding:5px 20px;font-size:9px;font-weight:700;text-transform:uppercase;'
-      +'letter-spacing:.08em;color:#b91c1c;background:#fff5f5;border-bottom:1px solid #fecaca">'
-      +'Out of Service ('+oos.length+')</div>';
-    html += oos.map(buildRow).join('');
-  }
-
-  const active16 = active.filter(function(t){ return t.size==='16ft'; });
-  const active21 = active.filter(function(t){ return t.size==='21ft'; });
-
-  if (active16.length) {
-    html += '<div style="padding:5px 20px;font-size:9px;font-weight:700;text-transform:uppercase;'
-      +'letter-spacing:.08em;color:var(--muted);background:var(--surface2);border-bottom:1px solid var(--border)">'
-      +'16ft Fleet ('+active16.length+')</div>';
-    html += active16.map(buildRow).join('');
-  }
-
-  if (active21.length) {
-    html += '<div style="padding:5px 20px;font-size:9px;font-weight:700;text-transform:uppercase;'
-      +'letter-spacing:.08em;color:#0369a1;background:#f0f9ff;border-bottom:1px solid #bae6fd">'
-      +'21ft Fleet — CDL Required ('+active21.length+')</div>';
-    html += active21.map(buildRow).join('');
-  }
-
-  container.innerHTML = html;
-}
-
-function _populateTruckSelects(fleet) {
-  // OOS select — show ACTIVE trucks for marking OOS + already-OOS trucks with indicator
-  const oosSel = document.getElementById('oos-truck-select');
-  if (oosSel) {
-    const current = oosSel.value;
-    oosSel.innerHTML = '<option value="">Select truck…</option>';
-
-    const active = fleet.filter(function(t){ return t.status === 'ACTIVE'; });
-    const oos    = fleet.filter(function(t){ return t.status === 'OOS'; });
-
-    if (active.length) {
-      const grp = document.createElement('optgroup');
-      grp.label = 'Active Trucks';
-      active.forEach(function(t) {
-        const opt = document.createElement('option');
-        opt.value = t.truck_id;
-        opt.textContent = t.truck_id + ' (' + t.size + (t.cdl ? ', CDL' : '') + ')';
-        grp.appendChild(opt);
-      });
-      oosSel.appendChild(grp);
-    }
-
-    if (oos.length) {
-      const grp2 = document.createElement('optgroup');
-      grp2.label = 'Already OOS (select to change window)';
-      oos.forEach(function(t) {
-        const opt = document.createElement('option');
-        opt.value = t.truck_id;
-        opt.textContent = t.truck_id + ' (' + t.size + ') — OOS'
-          + (t.oos_start ? ' from '+t.oos_start : '')
-          + (t.oos_end   ? ' until '+t.oos_end  : ' all-day');
-        grp2.appendChild(opt);
-      });
-      oosSel.appendChild(grp2);
-    }
-
-    if (current) oosSel.value = current;
-  }
-
-  // Swap select — all active trucks, sorted 16ft first then 21ft
-  const swapSel = document.getElementById('swap-new-truck');
-  if (swapSel) {
-    swapSel.innerHTML = '<option value="">Select replacement…</option>';
-    const active16 = fleet.filter(function(t){ return t.status==='ACTIVE' && t.size==='16ft'; });
-    const active21 = fleet.filter(function(t){ return t.status==='ACTIVE' && t.size==='21ft'; });
-
-    if (active16.length) {
-      const grp = document.createElement('optgroup');
-      grp.label = '16ft (non-CDL)';
-      active16.forEach(function(t) {
-        const opt = document.createElement('option');
-        opt.value = t.truck_id;
-        opt.textContent = t.truck_id
-          + (t.available_from && t.available_from !== '00:00' ? ' — free '+t.available_from : ' — available now');
-        grp.appendChild(opt);
-      });
-      swapSel.appendChild(grp);
-    }
-
-    if (active21.length) {
-      const grp = document.createElement('optgroup');
-      grp.label = '21ft (CDL required)';
-      active21.forEach(function(t) {
-        const opt = document.createElement('option');
-        opt.value = t.truck_id;
-        opt.textContent = t.truck_id
-          + (t.available_from && t.available_from !== '00:00' ? ' — free '+t.available_from : ' — available now');
-        grp.appendChild(opt);
-      });
-      swapSel.appendChild(grp);
-    }
-  }
-}
-
-// Quick OOS from fleet table row — opens OOS tab pre-filled
-function quickOosTruck(truckId) {
-  switchTruckTab('oos');
-  const sel = document.getElementById('oos-truck-select');
-  if (sel) sel.value = truckId;
-}
-
-async function restoreTruck(truckId) {
-  const sid = sessionId || (scheduleData && scheduleData.session_id);
-  if (!sid) return;
-  const token = localStorage.getItem('phl_auth_token') || '';
-  try {
-    const r = await fetch('/api/live/event/truck-restore', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Token': token},
-      body: JSON.stringify({session_id: sid, truck_id: truckId})
-    });
-    const data = await r.json();
-    if (data.error) { alert('Restore failed: ' + data.error); return; }
-    showToast(data.log || (truckId + ' restored'));
-    await loadFleetStatus();
-    _refreshFleetKpis();
-  } catch(e) { alert('Error: ' + e.message); }
-}
-
-async function submitTruckOos() {
-  const sid = sessionId || (scheduleData && scheduleData.session_id);
-  if (!sid) return;
-  const token = localStorage.getItem('phl_auth_token') || '';
-  const truckId  = document.getElementById('oos-truck-select').value;
-  const oosStart = document.getElementById('oos-start-time').value || null;
-  const oosEnd   = document.getElementById('oos-end-time').value   || null;
-  const reason   = document.getElementById('oos-reason').value.trim();
-  const resDiv   = document.getElementById('truck-oos-result');
-
-  if (!truckId) { alert('Select a truck.'); return; }
-
-  resDiv.style.display = 'none';
-  try {
-    const r = await fetch('/api/live/event/truck-oos', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Token': token},
-      body: JSON.stringify({session_id: sid, truck_id: truckId, oos_start: oosStart, oos_end: oosEnd, reason})
-    });
-    const data = await r.json();
-    if (data.error) {
-      resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:8px 0">'+_esc(data.error)+'</div>';
-      resDiv.style.display = ''; return;
-    }
-
-    // Build result summary
-    var lines = ['<div style="font-size:12px">'];
-    lines.push('<div style="font-weight:700;color:#166534;margin-bottom:6px">✓ '+_esc(truckId)+' marked OOS'+(oosEnd?' until '+oosEnd:' all-day')+'</div>');
-    if (data.auto_swapped && data.auto_swapped.length) {
-      lines.push('<div style="margin-bottom:4px;color:#374151">Auto-swapped '+data.auto_swapped.length+' run(s):</div>');
-      data.auto_swapped.forEach(function(s) {
-        lines.push('<div style="padding:2px 0;font-family:monospace;font-size:11px;color:#374151">  '
-          +_esc(s.old_truck)+' → '+_esc(s.new_truck)+' ('+_esc(s.new_size||'')+') — '
-          +(s.flights||[]).map(function(f){return 'AA'+f;}).join(', ')+'</div>');
-      });
-    }
-    if (data.manual_required && data.manual_required.length) {
-      lines.push('<div style="margin-top:6px;color:#b91c1c;font-weight:600">⚠ '+data.manual_required.length+' run(s) need manual truck assignment:</div>');
-      data.manual_required.forEach(function(m) {
-        lines.push('<div style="font-family:monospace;font-size:11px;color:#b91c1c">  '
-          +(m.flights||[]).map(function(f){return 'AA'+f;}).join(', ')
-          +(m.needs_21ft?' (requires 21ft)':'')+'</div>');
-      });
-    }
-    lines.push('</div>');
-    resDiv.innerHTML = lines.join('');
-    resDiv.style.display = '';
-
-    // Refresh fleet panel + dispatch board KPIs
-    if (data.result) {
-      scheduleData = data.result;
-      if (typeof renderResults === 'function') renderResults(data.result);
-    }
-    await loadFleetStatus();
-    _refreshFleetKpis();
-
-    // Auto-close after 2 seconds so dispatcher can see the result
-    setTimeout(function() { closeTruckPanel(); }, 2200);
-  } catch(e) {
-    resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px">Error: '+_esc(e.message)+'</div>';
-    resDiv.style.display = '';
-  }
-}
-
-async function previewTruckSwap() {
-  const flightNum = document.getElementById('swap-flight-num').value.trim().replace(/^AA/i,'');
-  const infoDiv   = document.getElementById('swap-flight-info');
-  if (!flightNum || !scheduleData) { infoDiv.style.display='none'; return; }
-
-  // Find flight in current schedule data
-  const assignments = (scheduleData.assignments || []);
-  const op = assignments.find(function(a){ return String(a.flight) === String(flightNum); });
-  if (!op) { infoDiv.style.display='none'; return; }
-
-  // Build siblings (same run_id)
-  const runId = op.run_id;
-  const siblings = runId
-    ? assignments.filter(function(a){ return a.run_id === runId; })
-    : [op];
-  const currentTruck = op.truck_id || '—';
-  const sizeReq      = op.truck_size_required || 'any';
-  const flightList   = siblings.map(function(s){return 'AA'+s.flight;}).join(', ');
-
-  infoDiv.innerHTML = '<div style="display:flex;flex-direction:column;gap:3px">'
-    +'<div><strong>Current truck:</strong> <span style="font-family:monospace">'+_esc(currentTruck)+'</span>'
-    +(op.truck_size ? ' ('+_esc(op.truck_size)+')' : '')+'</div>'
-    +'<div><strong>Run:</strong> <span style="font-family:monospace">'+_esc(flightList)+'</span>'
-    +(op.team ? ' — '+_esc(op.team) : '')+'</div>'
-    +(sizeReq==='21ft' ? '<div style="color:#0369a1;font-size:11px">⚠ WB INTL — replacement must be 21ft</div>' : '')
-    +'</div>';
-  infoDiv.style.display = '';
-
-  // Filter swap select to compatible trucks
-  const fleet = (window._fleetStatus && window._fleetStatus.fleet) || [];
-  const swapSel = document.getElementById('swap-new-truck');
-  swapSel.innerHTML = '<option value="">Select replacement…</option>';
-  fleet.filter(function(t){
-    if (t.status !== 'ACTIVE') return false;
-    if (t.truck_id === currentTruck) return false;
-    if (sizeReq === '21ft' && t.size !== '21ft') return false;
-    return true;
-  }).forEach(function(t) {
-    const opt = document.createElement('option');
-    opt.value = t.truck_id;
-    opt.textContent = t.truck_id + ' (' + t.size + (t.cdl?', CDL':'') + ')'
-      + (t.available_from && t.available_from!=='00:00' ? ' — free '+t.available_from : ' — available now');
-    swapSel.appendChild(opt);
-  });
-}
-
-async function submitTruckSwap() {
-  const sid       = sessionId || (scheduleData && scheduleData.session_id);
-  if (!sid) return;
-  const token      = localStorage.getItem('phl_auth_token') || '';
-  const flightNum  = document.getElementById('swap-flight-num').value.trim().replace(/^AA/i,'');
-  const newTruck   = document.getElementById('swap-new-truck').value;
-  const resDiv     = document.getElementById('truck-swap-result');
-
-  if (!flightNum) { alert('Enter a flight number.'); return; }
-  if (!newTruck)  { alert('Select a replacement truck.'); return; }
-
-  resDiv.style.display = 'none';
-  try {
-    const r = await fetch('/api/live/event/truck-swap', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Token': token},
-      body: JSON.stringify({session_id: sid, flight_num: flightNum, new_truck_id: newTruck})
-    });
-    const data = await r.json();
-    if (data.error) {
-      resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:8px 0">'+_esc(data.error)+'</div>';
-      resDiv.style.display=''; return;
-    }
-
-    resDiv.innerHTML = '<div style="font-size:12px;color:#166534;font-weight:700;padding:8px 0">'
-      +'✓ Truck swapped: '+_esc(data.old_truck||'?')+' → '+_esc(data.new_truck||'')+' ('+_esc(data.new_size||'')+')<br>'
-      +'<span style="font-weight:400;color:#374151;font-family:monospace">Run: '
-      +(data.flights_in_run||[]).map(function(f){return 'AA'+f;}).join(', ')+'</span></div>';
-    resDiv.style.display = '';
-
-    if (data.result) {
-      scheduleData = data.result;
-      if (typeof renderResults === 'function') renderResults(data.result);
-    }
-    await loadFleetStatus();
-    _refreshFleetKpis();
-
-    // Auto-close after 2 seconds
-    setTimeout(function() { closeTruckPanel(); }, 2200);
-  } catch(e) {
-    resDiv.innerHTML = '<div style="color:#b91c1c;font-size:12px">Error: '+_esc(e.message)+'</div>';
-    resDiv.style.display='';
-  }
-}
-
-function _refreshFleetKpis() {
-  // Re-render dispatch board if it's visible to pick up new fleet KPI strip
-  const dbRoot = document.getElementById('dispatch-board-root');
-  if (dbRoot && dbRoot.innerHTML && window.__dispatchModel) {
-    if (typeof renderDispatchBoard === 'function' && scheduleData) {
-      renderDispatchBoard(scheduleData);
-    }
-  }
-}
-
-// Small helper — used throughout (may already exist; safe redefinition)
-function _esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-
-function showToast(msg) {
-  var t = document.createElement('div');
-  t.textContent = msg;
-  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 20px;font-size:12px;border-radius:4px;z-index:9999;pointer-events:none';
-  document.body.appendChild(t);
-  setTimeout(function(){ t.remove(); }, 3000);
 }
 
 function populateLiveOpsDropdowns(data) {
@@ -3895,53 +3445,64 @@ function buildTeamCard(t) {
   const firstStd = ops[0]?.std || '—';
   const lastStd  = ops[ops.length-1]?.std || '—';
 
-  // Time span (first dispatch to last svc_end)
-  let spanStr = '—';
-  if (ops.length > 1) {
-    const first = ops[0].dispatch_min || 0;
-    const last  = (ops[ops.length-1].svc_end_min || ops[ops.length-1].dispatch_min || 0);
-    const spanMin = last - first;
-    if (spanMin > 0) spanStr = `${(spanMin/60).toFixed(1)} h`;
-  }
+  // Primary truck for this team — first op that has a truck_id
+  const primaryTruckOp = ops.find(o => o.truck_id) || null;
+  const truckId   = primaryTruckOp?.truck_id || t.truck_id || '';
+  const truckSize = primaryTruckOp?.truck_size || primaryTruckOp?.truck_height || '';
+  const truckSub  = [truckSize, 'truck'].filter(Boolean).join(' · ');
 
-  // Buffers between consecutive svc_end → next dispatch
-  const buffers = [];
-  for (let i = 1; i < ops.length; i++) {
-    const prevFree = ops[i-1].team_free_min || (ops[i-1].svc_end_min||0);
-    const nextDisp = ops[i].dispatch_min || 0;
-    const gap = nextDisp - prevFree;
-    buffers.push(gap);
-  }
-  const avgBuf = buffers.length ? Math.round(buffers.reduce((a,b)=>a+b,0)/buffers.length) : null;
-  const minBuf = buffers.length ? Math.min(...buffers) : null;
-  const minBufClass = minBuf === null ? '' : minBuf < 10 ? 'red' : minBuf < 20 ? 'warn' : 'good';
+  // Keycafe — placeholder until integration live; reads keycafe_code from team data
+  const keycafeCode = t.keycafe_code || null;
+  const keycafeWindow = (() => {
+    if (!t.shift) return '';
+    const parts = t.shift.replace('\u2013','-').replace('\u2014','-').split('-');
+    if (parts.length < 2) return '';
+    const start = parts[0].trim();
+    // end window = shift end + 1hr buffer
+    const endParts = parts[1].trim().split(':');
+    if (endParts.length < 2) return `${start} – ${parts[1].trim()}`;
+    const endH = parseInt(endParts[0], 10);
+    const endM = parseInt(endParts[1], 10);
+    const bufH = Math.floor((endH * 60 + endM + 60) / 60) % 24;
+    const bufM = (endH * 60 + endM + 60) % 60;
+    const bufStr = `${String(bufH).padStart(2,'0')}:${String(bufM).padStart(2,'0')}`;
+    return `${start} – ${bufStr}`;
+  })();
+
+  const keycafeHtml = truckId ? (keycafeCode
+    ? `<div class="tdc-keycafe">
+         <span class="tdc-keycafe-lbl">Keycafe</span>
+         <span class="tdc-keycafe-code">${keycafeCode.toString().split('').join(' ')}</span>
+         <span class="tdc-keycafe-window">${keycafeWindow}</span>
+       </div>`
+    : `<div class="tdc-keycafe pending">
+         <span class="tdc-keycafe-lbl">Keycafe</span>
+         <span class="tdc-keycafe-code">— pending —</span>
+         <span class="tdc-keycafe-window">${keycafeWindow}</span>
+       </div>`)
+    : '';
+
+  const truckHtml = truckId
+    ? `<div class="tdc-divider"></div>
+       <div class="tdc-truck-block">
+         <span class="tdc-truck-num">${truckId}</span>
+         <span class="tdc-truck-sub">${truckSub || 'truck'}</span>
+       </div>
+       <div class="tdc-divider"></div>
+       ${keycafeHtml}`
+    : '';
 
   // Header colour class
   const hdrCls = ttype==='OVERNIGHT' ? 'ovn' : ttype==='PT' ? 'pt' : '';
 
-  // Collect distinct trucks for this team (across all runs)
-  const teamTrucks = [...new Set(ops.map(o => o.truck_id).filter(Boolean))];
-  const truckStat = teamTrucks.length
-    ? teamTrucks.map(tr => {
-        const sz = ops.find(o => o.truck_id === tr)?.truck_size || '';
-        const is21 = sz === '21ft';
-        return `<span style="font-family:var(--mono);font-size:11px;font-weight:700;`
-          + (is21 ? 'color:#0369a1' : 'color:var(--text2)') + `">${tr}</span>`
-          + (sz ? `<span style="font-size:9px;color:var(--muted);margin-left:2px">${sz}</span>` : '');
-      }).join(' <span style="color:var(--muted)">·</span> ')
-    : '—';
-
-  // Per-flight rows — group by run_id (preferred) or dispatch_min fallback
+  // Per-flight rows — group by dispatch_min to assign run numbers
   let rows = '';
   let runNum = 0;
-  let lastRunKey = null;
-  let lastRunTruck = null;
+  let lastDispatch = null;
   ops.forEach((op, idx) => {
-    // Use run_id if available (set by scheduler_engine), else fall back to dispatch_min
-    const runKey = op.run_id || op.dispatch_min || op.dispatch || String(idx);
-    const isNewRun = runKey !== lastRunKey;
-    if (isNewRun) { runNum++; lastRunKey = runKey; lastRunTruck = null; }
-    const sameRun = idx > 0 && !isNewRun;
+    const dispKey = op.dispatch_min || op.dispatch || '';
+    if (dispKey !== lastDispatch) { runNum++; lastDispatch = dispKey; }
+    const sameRun = idx > 0 && (ops[idx-1].dispatch_min || ops[idx-1].dispatch || '') === dispKey;
 
     // Buffer between runs
     const prev = idx > 0 ? ops[idx-1] : null;
@@ -3978,20 +3539,6 @@ function buildTeamCard(t) {
     const noseCell = op.nose
       ? `<span style="font-weight:700;font-family:var(--mono)">${op.nose}</span>` : '—';
 
-    // Truck cell — show on first flight of each run only, muted dot for subsequent stops
-    let truckCell = '';
-    const trk = op.truck_id;
-    if (isNewRun && trk) {
-      const trkSz   = op.truck_size || '';
-      const is21ft  = trkSz === '21ft';
-      const trkColor = is21ft ? '#0369a1' : 'var(--text2)';
-      truckCell = `<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:${trkColor}">${trk}</span>`
-        + (trkSz ? `<br><span style="font-size:9px;color:var(--muted)">${trkSz}</span>` : '');
-      lastRunTruck = trk;
-    } else if (sameRun) {
-      truckCell = `<span style="font-size:10px;color:var(--muted)">↑</span>`;
-    }
-
     rows += `<tr class="${rowCls}" data-flight="${op.flight}" data-dest="${op.dest||''}">
       <td class="stop-num"><span style="${runNumStyle}">${runNum}</span></td>
       <td class="fn" style="color:var(--accent)">${op.flight}</td>
@@ -4003,7 +3550,6 @@ function buildTeamCard(t) {
       <td style="color:var(--muted)">${op.dispatch||'—'}</td>
       <td>${op.svc_start||'—'} <span style="color:var(--muted)">→</span> ${op.svc_end||'—'}</td>
       <td style="font-size:11px">${noseCell}</td>
-      <td style="white-space:nowrap;line-height:1.3">${truckCell}</td>
       <td><button class="run-stop-remove" onclick="openRunEditor('${t.team_id}','${op.flight}',event)" style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 8px">Edit</button></td>
     </tr>`;
 
@@ -4028,26 +3574,17 @@ function buildTeamCard(t) {
   return `
   <div class="tdc" id="tdc-${t.team_id}" data-team="${t.team_id}">
     <div class="tdc-header ${hdrCls}">
-      <div>
-        <div class="tdc-title">${t.team_id}</div>
-        <div class="tdc-shift">${ttype} · ${t.shift}</div>
+      <div class="tdc-left">
+        <div>
+          <div class="tdc-title">${t.team_id}</div>
+          <div class="tdc-shift">${ttype} · ${t.shift}</div>
+        </div>
+        ${truckHtml}
       </div>
       <div class="tdc-stats">
         <div class="tdc-stat">
           <span class="tdc-stat-val">${fc}/${t.cap}</span>
           <span class="tdc-stat-lbl">Flights</span>
-        </div>
-        <div class="tdc-stat">
-          <span class="tdc-stat-val">${spanStr}</span>
-          <span class="tdc-stat-lbl">Span</span>
-        </div>
-        <div class="tdc-stat">
-          <span class="tdc-stat-val ${minBufClass}">${minBuf !== null ? minBuf+'m' : '—'}</span>
-          <span class="tdc-stat-lbl">Min Buffer</span>
-        </div>
-        <div class="tdc-stat">
-          <span class="tdc-stat-val">${avgBuf !== null ? avgBuf+'m' : '—'}</span>
-          <span class="tdc-stat-lbl">Avg Buffer</span>
         </div>
         <div class="tdc-stat">
           <span class="tdc-stat-val">${firstStd}</span>
@@ -4056,10 +3593,6 @@ function buildTeamCard(t) {
         <div class="tdc-stat">
           <span class="tdc-stat-val">${lastStd}</span>
           <span class="tdc-stat-lbl">Last STD</span>
-        </div>
-        <div class="tdc-stat" title="Assigned truck(s) for this team">
-          <span class="tdc-stat-val" style="font-size:12px">${truckStat}</span>
-          <span class="tdc-stat-lbl">Truck</span>
         </div>
       </div>
     </div>
@@ -4075,7 +3608,6 @@ function buildTeamCard(t) {
         <th>Dispatch</th>
         <th>Service Window</th>
         <th>Nose</th>
-        <th>Truck</th>
         <th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
@@ -4405,7 +3937,7 @@ function renderResults(data) {
   // Enable Live Ops buttons for managers/supervisors on any loaded schedule
   const role = currentUser ? currentUser.role : 'agent';
   if (role === 'manager' || role === 'supervisor' || role === 'admin') {
-    ['btn-sick','btn-delay','btn-gate','btn-move','btn-truck','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = false;
     });
@@ -5229,25 +4761,7 @@ function _dbStyles() {
   /* ─── Buttons ─── */
   +'.db-action-row{display:flex;gap:8px;padding:12px var(--db-px)}'  +'.db-btn{padding:6px 14px;border:1px solid var(--db-border);background:var(--db-surface);font-size:12px;cursor:pointer;font-family:inherit;color:var(--db-text);line-height:1.4}'  +'.db-btn:hover{background:var(--db-surface2)}'  +'.db-btn-primary{background:var(--db-blue);color:#fff;border-color:var(--db-blue)}'  +'.db-btn-primary:hover{opacity:.9}'  +'.db-btn-success{color:var(--db-green);border-color:#d1fae5}'  +'.db-btn-success:hover{background:#f0fdf4}'  +'.db-btn-danger{color:var(--db-red);border-color:#fecaca}'  +'.db-btn-danger:hover{background:#fff5f5}'
   /* ─── Misc ─── */
-  +'.db-empty{font-size:12px;color:var(--db-muted);padding:24px var(--db-px)}'  +'.db-pill{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}'  +'.db-pill-review{color:var(--db-red)}'  +'.db-pill-done,.db-pill-alerted{color:var(--db-green)}'  +'.db-pill-fh,.db-pill-alert{color:var(--db-amber)}'  +'.db-pill-manual,.db-pill-auto{color:var(--db-muted)}'  +'@media(max-width:1100px){.db-wrap{grid-template-columns:1fr}.db-summary{grid-template-columns:repeat(3,1fr)}}'
-  /* ─── Fleet strip ─── */
-  +'.db-fleet-strip{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--db-border);background:var(--db-surface2);padding:0 var(--db-px)}'
-  +'.db-fleet-tile{display:flex;flex-direction:column;padding:8px 16px 8px 0;margin-right:16px;border-right:1px solid var(--db-border2)}'
-  +'.db-fleet-v{font-size:20px;font-weight:600;font-family:var(--db-mono);color:var(--db-text);line-height:1}'
-  +'.db-fleet-l{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--db-muted);margin-top:3px;font-weight:500}'
-  +'.db-fleet-oos-list{font-size:11px;font-family:var(--db-mono);color:var(--db-red);padding:0 12px;flex:1}'
-  +'.db-fleet-btn{margin-left:auto;font-size:11px;font-weight:600;color:#0369a1;background:none;border:1px solid #bae6fd;padding:5px 12px;cursor:pointer;font-family:inherit;white-space:nowrap}'
-  +'.db-fleet-btn:hover{background:#f0f9ff}'
-  /* ─── Truck panel overlay ─── */
-  +'.db-truck-pill-21{font-size:9px;font-weight:700;color:#0369a1;letter-spacing:.04em;text-transform:uppercase;background:#e0f2fe;padding:1px 5px}'
-  +'.db-truck-pill-16{font-size:9px;font-weight:700;color:#374151;letter-spacing:.04em;text-transform:uppercase;background:#f3f4f6;padding:1px 5px}'
-  +'.db-truck-pill-oos{font-size:9px;font-weight:700;color:var(--db-red);letter-spacing:.04em;text-transform:uppercase;background:#fee2e2;padding:1px 5px}'
-  +'.db-truck-row{display:grid;grid-template-columns:70px 44px 36px 1fr auto auto;align-items:center;gap:8px;padding:7px var(--db-px);border-bottom:1px solid var(--db-border2);font-size:12px}'
-  +'.db-truck-row:hover{background:var(--db-surface2)}'
-  +'.db-truck-id{font-family:var(--db-mono);font-weight:700;color:var(--db-text)}'
-  +'.db-truck-flights{font-size:11px;color:var(--db-muted);font-family:var(--db-mono)}'
-  +'.db-truck-avail{font-size:10px;color:var(--db-muted)}'
-  +'</style>';
+  +'.db-empty{font-size:12px;color:var(--db-muted);padding:24px var(--db-px)}'  +'.db-pill{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}'  +'.db-pill-review{color:var(--db-red)}'  +'.db-pill-done,.db-pill-alerted{color:var(--db-green)}'  +'.db-pill-fh,.db-pill-alert{color:var(--db-amber)}'  +'.db-pill-manual,.db-pill-auto{color:var(--db-muted)}'  +'@media(max-width:1100px){.db-wrap{grid-template-columns:1fr}.db-summary{grid-template-columns:repeat(3,1fr)}}'  +'</style>';
 }
 
 function _dbRenderEventCards(events) {
@@ -5562,21 +5076,6 @@ function renderDispatchBoard(data) {
     return '<div class="db-kpi"><div class="v" style="'+k[2]+'">'+k[0]+'</div><div class="l">'+k[1]+'</div></div>';
   }).join('');
 
-  // Fleet KPI strip — injected after main KPIs
-  var fleetKpis = '';
-  if (window._fleetStatus) {
-    var fs = window._fleetStatus;
-    var oosColor = (fs.oos_count||0) > 0 ? 'color:#dc2626' : '';
-    fleetKpis = '<div class="db-fleet-strip">'
-      +'<div class="db-fleet-tile"><span class="db-fleet-v">'+((fs.active_16ft||0)+(fs.active_21ft||0))+'</span><span class="db-fleet-l">Active Trucks</span></div>'
-      +'<div class="db-fleet-tile"><span class="db-fleet-v">'+((fs.active_16ft||0))+'</span><span class="db-fleet-l">16ft</span></div>'
-      +'<div class="db-fleet-tile"><span class="db-fleet-v">'+((fs.active_21ft||0))+'</span><span class="db-fleet-l">21ft</span></div>'
-      +'<div class="db-fleet-tile"><span class="db-fleet-v" style="'+oosColor+'">'+(fs.oos_count||0)+'</span><span class="db-fleet-l">OOS</span></div>'
-      +(fs.oos_list && fs.oos_list.length ? '<div class="db-fleet-oos-list">OOS: '+(fs.oos_list||[]).join(', ')+'</div>' : '')
-      +'<button class="db-fleet-btn" onclick="openTruckPanel()">Manage Fleet →</button>'
-      +'</div>';
-  }
-
   var firstDetail = model.events.length
     ? _dbRenderDetailPanel(model.events[0], model)
     : '<div class="db-empty">Select an event or click a REVIEW pill to see options.</div>';
@@ -5586,7 +5085,6 @@ function renderDispatchBoard(data) {
   root.innerHTML = _dbStyles()
     +'<div class="db-frame">'
     +'<div class="db-summary">'+kpis+'</div>'
-    +(fleetKpis)
     +(model.issues.length ? '<div class="db-action-banner">'+_dbRenderIssuesBanner(model.issues, model)+'</div>' : '')
     +'<div class="db-wrap">'
     +'<div class="db-col-log" style="max-height:78vh;overflow-y:auto">'
@@ -6648,9 +6146,6 @@ function loadSavedSchedule(date, shift) {
     window._scheduleDay = data.day_of_week || window._scheduleDay;
     renderResults(data);
     populateLiveOpsDropdowns(data);
-
-    // Fetch fleet status in background
-    setTimeout(function() { if (typeof loadFleetStatus === 'function') loadFleetStatus(); }, 200);
 
     // Collapse sidebar so main gets full width
     var sb = document.getElementById('sidebar');
@@ -8030,151 +7525,6 @@ applySession = function(user) {
       style="width:36px;height:36px;border-radius:50%;background:#2563eb;color:#fff;border:none;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">&#10148;</button>
   </div>
 </div>
-
-<!-- ═══════════════════════════════════════════════════════════════════════
-     FLEET MANAGEMENT PANEL — Truck OOS / Swap / Status
-     ═══════════════════════════════════════════════════════════════════ -->
-<div id="modal-truck" style="display:none;position:fixed;inset:0;z-index:400;
-  background:rgba(15,23,42,0.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
-  align-items:flex-start;justify-content:center;overflow-y:auto;padding:48px 16px 32px">
-  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;
-    width:min(800px,96vw);margin:0 auto;box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:hidden">
-
-    <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;
-      padding:18px 24px;border-bottom:1px solid var(--border)">
-      <div>
-        <div style="font-size:15px;font-weight:700;color:var(--text)">Fleet Management</div>
-        <div id="truck-panel-sub" style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:3px">Loading fleet status…</div>
-      </div>
-      <button onclick="closeTruckPanel()" style="background:none;border:none;font-size:22px;
-        color:var(--muted);cursor:pointer;padding:4px 8px;line-height:1;border-radius:4px">&times;</button>
-    </div>
-
-    <!-- Tab bar -->
-    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 8px">
-      <button id="truck-tab-fleet" class="truck-tab truck-tab-active" onclick="switchTruckTab('fleet')">Fleet Status</button>
-      <button id="truck-tab-oos"   class="truck-tab"                  onclick="switchTruckTab('oos')">Mark OOS</button>
-      <button id="truck-tab-swap"  class="truck-tab"                  onclick="switchTruckTab('swap')">Swap Truck</button>
-    </div>
-
-    <!-- Tab: Fleet Status -->
-    <div id="truck-pane-fleet" style="max-height:65vh;overflow-y:auto">
-      <div style="display:grid;grid-template-columns:72px 44px 36px 80px 1fr 70px 90px;
-        gap:8px;padding:7px 24px;font-size:9px;font-weight:700;text-transform:uppercase;
-        letter-spacing:.08em;color:var(--muted);border-bottom:1px solid var(--border);
-        background:var(--surface2);position:sticky;top:0;z-index:1">
-        <span>Truck</span><span>Size</span><span>CDL</span><span>Team</span>
-        <span>Flights / Status</span><span>Free At</span><span>Action</span>
-      </div>
-      <div id="truck-fleet-rows">
-        <div style="padding:32px 24px;font-size:12px;color:var(--muted);text-align:center">Loading fleet data…</div>
-      </div>
-    </div>
-
-    <!-- Tab: Mark OOS -->
-    <div id="truck-pane-oos" style="display:none;padding:28px 24px">
-      <div style="margin-bottom:18px">
-        <label style="display:block;font-size:10px;font-weight:700;color:var(--muted);
-          text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">Truck</label>
-        <select id="oos-truck-select" style="width:100%;padding:10px 12px;height:42px;
-          border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface);
-          color:var(--text);font-family:var(--sans);font-size:13px;cursor:pointer">
-          <option value="">Select truck to mark OOS…</option>
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
-        <div>
-          <label style="display:block;font-size:10px;font-weight:700;color:var(--muted);
-            text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">
-            OOS Start
-            <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(blank = start of day)</span>
-          </label>
-          <input type="time" id="oos-start-time" style="width:100%;padding:10px 12px;height:42px;
-            border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface);
-            color:var(--text);font-family:var(--sans);font-size:13px">
-        </div>
-        <div>
-          <label style="display:block;font-size:10px;font-weight:700;color:var(--muted);
-            text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">
-            OOS End
-            <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(blank = all-day)</span>
-          </label>
-          <input type="time" id="oos-end-time" style="width:100%;padding:10px 12px;height:42px;
-            border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface);
-            color:var(--text);font-family:var(--sans);font-size:13px">
-        </div>
-      </div>
-      <div style="margin-bottom:22px">
-        <label style="display:block;font-size:10px;font-weight:700;color:var(--muted);
-          text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">Reason (optional)</label>
-        <input type="text" id="oos-reason" placeholder="e.g. mechanical, maintenance, damage"
-          style="width:100%;padding:10px 12px;height:42px;border:1.5px solid var(--border);
-          border-radius:var(--radius);background:var(--surface);color:var(--text);
-          font-family:var(--sans);font-size:13px">
-      </div>
-      <div id="truck-oos-result" style="display:none;margin-bottom:18px;padding:14px 16px;
-        border-radius:var(--radius);border:1px solid var(--border2)"></div>
-      <div style="display:flex;gap:10px">
-        <button onclick="submitTruckOos()" style="flex:1;padding:12px;background:var(--danger);
-          color:#fff;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;
-          cursor:pointer;font-family:var(--sans)">Mark OOS</button>
-        <button onclick="closeTruckPanel()" style="padding:12px 28px;background:var(--surface);
-          border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;
-          cursor:pointer;font-family:var(--sans);color:var(--text2);font-weight:500">Cancel</button>
-      </div>
-    </div>
-
-    <!-- Tab: Swap Truck -->
-    <div id="truck-pane-swap" style="display:none;padding:28px 24px">
-      <div style="margin-bottom:18px">
-        <label style="display:block;font-size:10px;font-weight:700;color:var(--muted);
-          text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">
-          Flight Number
-          <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(any flight in the run to swap)</span>
-        </label>
-        <input type="text" id="swap-flight-num" placeholder="e.g. 423"
-          oninput="previewTruckSwap()"
-          style="width:100%;padding:10px 12px;height:42px;border:1.5px solid var(--border);
-          border-radius:var(--radius);background:var(--surface);color:var(--text);
-          font-family:var(--sans);font-size:13px">
-      </div>
-      <div id="swap-flight-info" style="display:none;margin-bottom:18px;padding:14px 16px;
-        background:var(--surface2);border:1.5px solid var(--border);
-        border-radius:var(--radius);font-size:12px;line-height:1.6"></div>
-      <div style="margin-bottom:22px">
-        <label style="display:block;font-size:10px;font-weight:700;color:var(--muted);
-          text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">Replace With</label>
-        <select id="swap-new-truck" style="width:100%;padding:10px 12px;height:42px;
-          border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface);
-          color:var(--text);font-family:var(--sans);font-size:13px;cursor:pointer">
-          <option value="">Select replacement truck…</option>
-        </select>
-      </div>
-      <div id="truck-swap-result" style="display:none;margin-bottom:18px;padding:14px 16px;
-        border-radius:var(--radius);border:1px solid var(--border2)"></div>
-      <div style="display:flex;gap:10px">
-        <button onclick="submitTruckSwap()" style="flex:1;padding:12px;background:var(--accent);
-          color:#fff;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;
-          cursor:pointer;font-family:var(--sans)">Swap Truck</button>
-        <button onclick="closeTruckPanel()" style="padding:12px 28px;background:var(--surface);
-          border:1.5px solid var(--border);border-radius:var(--radius);font-size:13px;
-          cursor:pointer;font-family:var(--sans);color:var(--text2);font-weight:500">Cancel</button>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<style>
-.truck-tab {
-  padding:12px 18px;font-size:12px;font-weight:600;color:var(--muted);
-  background:none;border:none;cursor:pointer;font-family:var(--sans);
-  border-bottom:2px solid transparent;letter-spacing:.01em;transition:color .12s;
-}
-.truck-tab:hover { color:var(--text); }
-.truck-tab-active { color:var(--accent);border-bottom-color:var(--accent); }
-</style>
 
 </body>
 </html>
