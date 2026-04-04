@@ -31,26 +31,36 @@ G2G_CROSS      = 10   # gate-to-gate cross concourse [CONFIRM]
 # Truck dock reload: clean + reload (minutes)
 # [CONFIRMED] Coordinator: DOM truck loads in ~15min
 DOCK_RELOAD    = 15   # [CONFIRMED] DOM ~15min; INTL may be longer (TODO separate)
-TRUCK_COUNT    = 30   # [UPDATED] 30 to handle peak morning window + false-intl buffer inflation
+TRUCK_COUNT    = 34   # 12 × 16ft + 22 × 21ft = 34 active trucks
 
-# ── Real fleet registry ──────────────────────────────────────────────────
-FLEET_16FT: list = [f'T{i:02d}' for i in range(1, 23)]
-FLEET_21FT: list = [f'T{i:02d}' for i in range(23, 31)]
-FLEET_ALL:  list = FLEET_16FT + FLEET_21FT
+# ── Real fleet registry (source: PHL_Truck_List_2026.xlsx) ───────────────────
+# 16ft domestic hi-loaders — no CDL required
+FLEET_16FT: list = [
+    'FL251','FL252',                                              # 2015
+    'FL389','FL390','FL391','FL392','FL393','FL394',              # 2025 Mallaghan
+    'FL395','FL396','FL397','FL398',                              # 2025 Mallaghan
+]  # 12 trucks
+
+# 21ft widebody / international hi-loaders — CDL required
+# These are the ONLY trucks that can service WB INTL flights at gate A
+FLEET_21FT: list = [
+    'FL181',                                                      # 1999
+    'FL202','FL207',                                              # 2000
+    'FL221','FL222','FL224','FL225','FL230',                      # 2007–2011
+    'FL234','FL238',                                              # 2012
+    'FL248','FL249','FL250',                                      # 2013
+    'FL259','FL261','FL262','FL263','FL264','FL265',              # 2019
+    'FL266','FL267','FL268',                                      # 2019
+]  # 22 trucks
+
+FLEET_ALL:  list = FLEET_16FT + FLEET_21FT                        # all 34
 FLEET_SIZE: dict = {t: '16ft' for t in FLEET_16FT} | {t: '21ft' for t in FLEET_21FT}
 FLEET_CDL:  dict = {t: False  for t in FLEET_16FT} | {t: True   for t in FLEET_21FT}
 
 # Team turnaround (minutes)
 # [CONFIRMED] Coordinator: grab-and-go. Team personally ready in ~5min.
 # Truck loading (DOCK_RELOAD=15) is the binding constraint, not team readiness.
-TEAM_MIN_TURNAROUND         = 5    # [CONFIRMED] domestic / narrowbody grab-and-go
-# WB INTL turnaround: team must sign off 21ft truck, brief for next international run,
-# collect keys, and re-dispatch. 5min is not operationally feasible after a 45-min
-# A-concourse widebody service. 20min confirmed as minimum realistic gap.
-# Root cause of TM218 AA0722→AA0728 conflict (Sun 05 Apr): model used 5min, producing
-# a 0-minute gap at kitchen (16:42 arrive, 16:47 dispatch) which the no-overlap
-# constraint technically passed but is not achievable on the ground.
-TEAM_MIN_TURNAROUND_WB_INTL = 20   # [CONFIRMED] widebody international runs
+TEAM_MIN_TURNAROUND  = 5    # [CONFIRMED]
 TEAM_READY_OFFSET    = 15   # minutes after shift start before first assignment
 
 MAX_INTL_STD_GAP     = 35
@@ -82,12 +92,18 @@ WIDEBODY   = {'7878','7879','789P','789W'}
 INTL_TYPES = {'International','Precleared'}
 
 def _run_requires_21ft(run_ops) -> bool:
-    """True if any flight requires a 21ft truck (WB true-international)."""
+    """Return True if any flight in this run is a true-international widebody.
+    WB INTL flights must be serviced by a 21ft truck (FL221–FL230).
+    run_ops: list of assignment dicts (live_ops) or Flight objects (scheduler)."""
     for op in run_ops:
         if isinstance(op, dict):
-            is_wb, is_intl, is_pre = op.get('is_wb',False), op.get('is_intl',False), op.get('is_precleared',False)
+            is_wb   = op.get('is_wb', False)
+            is_intl = op.get('is_intl', False)
+            is_pre  = op.get('is_precleared', False)
         else:
-            is_wb, is_intl, is_pre = getattr(op,'is_wb',False), getattr(op,'is_intl',False), getattr(op,'is_precleared',False)
+            is_wb   = getattr(op, 'is_wb', False)
+            is_intl = getattr(op, 'is_intl', False)
+            is_pre  = getattr(op, 'is_precleared', False)
         if is_wb and is_intl and not is_pre:
             return True
     return False
@@ -257,7 +273,7 @@ def apply_run_truck_ids(result: dict, truck_count: int = TRUCK_COUNT) -> dict:
         else:
             trucks[assigned_idx] = (r['end'], assigned_num)
         trucks.sort(key=lambda x: (x[0], x[1]))
-        run_to_truck[r['key']] = f"T{assigned_num:02d}" if assigned_num <= truck_count else f"T{assigned_num:02d}*"
+        run_to_truck[r['key']] = FLEET_ALL[assigned_num - 1] if assigned_num <= truck_count else f'FL{200 + assigned_num}*'
 
     for (team_id, disp), ops in runs.items():
         meta = next(m for m in run_meta if m['key'] == (team_id, disp))
@@ -550,17 +566,12 @@ class Run:
         return t
 
     def team_busy(self) -> int:
-        """drive_to_first + sum(svc) + sum(g2g) + drive_back_from_last + turnaround.
-        WB INTL runs use TEAM_MIN_TURNAROUND_WB_INTL (20min) instead of the standard
-        5min grab-and-go, reflecting the time needed to sign off a 21ft truck, brief
-        for the next international run, and collect keys before re-dispatch."""
+        """drive_to_first + sum(svc) + sum(g2g) + drive_back_from_last + turnaround"""
         t = drv(self.flights[0].gate)
         for k, f in enumerate(self.flights):
             if k > 0: t += g2g(self.flights[k-1].gate, f.gate)
             t += f.svc_time
-        t += drv(self.flights[-1].gate)
-        is_wb_intl = any(f.is_wb and f.is_true_intl for f in self.flights)
-        t += TEAM_MIN_TURNAROUND_WB_INTL if is_wb_intl else TEAM_MIN_TURNAROUND
+        t += drv(self.flights[-1].gate) + TEAM_MIN_TURNAROUND
         return t
 
     def earliest_feasible_dispatch(self, team_ready: int) -> Optional[int]:
