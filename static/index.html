@@ -986,6 +986,7 @@ body.authenticated #login-screen { display: none !important; }
             ✓ Confirm Schedule
           </button>
           <button class="btn-op" id="btn-export" onclick="exportExcel()" disabled>Export Excel</button>
+          <button class="btn-op" id="btn-export-coord" onclick="exportCoord()" disabled style="display:none">Export COORD</button>
           <div class="change-log-wrap" id="change-log-wrap" style="display:none">
             <div class="change-dot"></div>
             <span class="change-count" id="change-count">0 changes</span>
@@ -1925,9 +1926,9 @@ async function runSchedule() {
     renderResults(data);
     populateLiveOpsDropdowns(data);
     // Enable live ops buttons now that we have a session
-    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export','btn-export-coord'].forEach(id => {
       const btn = document.getElementById(id);
-      if (btn) btn.disabled = false;
+      if (btn) { btn.disabled = false; btn.style.display = ''; }
     });
     const hint = document.getElementById('live-ops-hint');
     if (hint) hint.style.display = 'none';
@@ -3367,6 +3368,40 @@ async function exportExcel() {
   }
 }
 
+async function exportCoord() {
+  if (!sessionId) { alert('Generate a schedule first'); return; }
+  const btn  = document.getElementById('btn-export-coord');
+  const orig = btn.textContent;
+  btn.textContent = 'Building COORD…'; btn.disabled = true;
+  try {
+    const resp = await fetch('/api/export/coord', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ session_id: sessionId })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert('COORD export failed: ' + (err.error || 'Unknown error'));
+      return;
+    }
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const cd   = resp.headers.get('Content-Disposition') || '';
+    const fn   = cd.match(/filename="(.+)"/);
+    a.download = fn ? fn[1] : 'PHL_COORD.xlsx';
+    a.href = url;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+  } catch (e) {
+    alert('COORD export error: ' + e.message);
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+}
+
 function collapseSidebar(data) {
   const sb = document.getElementById('sidebar');
   sb.style.display = 'none';
@@ -3502,80 +3537,98 @@ function buildTeamCard(t) {
   // Header colour class
   const hdrCls = ttype==='OVERNIGHT' ? 'ovn' : ttype==='PT' ? 'pt' : '';
 
-  // Per-flight rows — group by dispatch_min to assign run numbers
+  // ── COORD-sheet style rows ─────────────────────────────────────────────
+  // Columns: # | FLIGHT | NOSE | GATE | EQP | INBOUND | TO | STD | TYPE |
+  //          DISPATCH | SVC WINDOW | RUN | BATCH | NOTES | [Edit]
+  // Row colours match the PHL_COORD_sample spreadsheet exactly:
+  //   cream  #FFF9EC — flight has inbound (TURN)
+  //   white  #FFFFFF — RON, odd batch index
+  //   blue   #EEF4FB — RON, even batch index
   let rows = '';
   let runNum = 0;
+  let batchIdx = -1;
   let lastDispatch = null;
+
+  // Pre-compute run sizes so we can show the size badge on the first stop
+  const runSizeMap = {};
+  ops.forEach(op => {
+    const k = op.dispatch_min != null ? op.dispatch_min : op.dispatch || '';
+    runSizeMap[k] = (runSizeMap[k] || 0) + 1;
+  });
+
   ops.forEach((op, idx) => {
-    const dispKey = op.dispatch_min || op.dispatch || '';
-    if (dispKey !== lastDispatch) { runNum++; lastDispatch = dispKey; }
-    const sameRun = idx > 0 && (ops[idx-1].dispatch_min || ops[idx-1].dispatch || '') === dispKey;
+    const dispKey = op.dispatch_min != null ? op.dispatch_min : op.dispatch || '';
+    const isFirstInRun = dispKey !== lastDispatch;
+    if (isFirstInRun) { runNum++; batchIdx++; lastDispatch = dispKey; }
 
-    // Buffer between runs
-    const prev = idx > 0 ? ops[idx-1] : null;
-    const bufMin = (!prev || sameRun)
-      ? null
-      : ((op.dispatch_min||0) - (prev.team_free_min||prev.svc_end_min||0));
-    const bufStr = bufMin === null ? (sameRun ? '·' : '') : `${bufMin}m`;
-    const bufCls = bufMin === null ? '' : bufMin < 10 ? 'buf-tight' : bufMin < 20 ? 'buf-warn' : 'buf-ok';
+    const isTurn = !!op.inbound_flight;
 
-    const rowCls = 'main-row ' + ((op.is_intl && !op.is_precleared) ? 'row-intl'
-      : op.is_short_turn ? 'row-st' : op.is_ron ? 'row-ron'
-      : op.delayed ? 'row-delayed' : op.auto_reassigned ? 'row-reassigned' : '');
+    // Row background — COORD sheet colour logic
+    const rowBg = isTurn ? '#FFF9EC' : (batchIdx % 2 === 0 ? '#FFFFFF' : '#EEF4FB');
 
-    const typeBadge = (op.is_intl && !op.is_precleared)
-      ? '<span class="badge-intl">INTL</span>'
-      : op.is_precleared ? '<span class="badge-pre">PRECLRD</span>'
-      : op.is_ron ? '<span class="badge-ron">RON</span>' : '';
-    const turnBadge = groundTurnBadge(op);
-    const delayBadge = op.delayed
-      ? ` <span class="badge-delay">+${op.delay_mins||'?'}m</span>` : '';
-    const reassignBadge = op.auto_reassigned
-      ? ` <span class="badge-reassign">REASGN</span>` : '';
-
-    const runNumStyle = sameRun || op.run_size > 1
-      ? 'font-size:11px;font-weight:700;color:var(--accent)'
-      : 'font-size:11px;color:var(--muted)';
-
-    // STD cell — show strikethrough original if delayed
-    const stdCell = op.std ? (op.delayed
-      ? `<span style="color:#92400e;font-weight:700">${op.std}</span> <span style="font-size:10px;color:var(--muted);text-decoration:line-through">${op.original_std||''}</span>`
-      : `<strong>${op.std}</strong>`) : '—';
-
-    // Nose only (PAX removed)
-    const noseCell = op.nose
-      ? `<span style="font-weight:700;font-family:var(--mono)">${op.nose}</span>` : '—';
-
-    rows += `<tr class="${rowCls}" data-flight="${op.flight}" data-dest="${op.dest||''}">
-      <td class="stop-num"><span style="${runNumStyle}">${runNum}</span></td>
-      <td class="fn" style="color:var(--accent)">${op.flight}</td>
-      <td style="font-weight:600">${op.dest||'—'}</td>
-      <td style="font-family:-apple-system,sans-serif">${typeBadge}${turnBadge}${delayBadge}${reassignBadge}</td>
-      <td style="font-weight:800;font-size:13px;letter-spacing:.02em">${op.gate||'—'}</td>
-      <td>${op.equip||'—'}</td>
-      <td class="col-std">${stdCell}</td>
-      <td style="color:var(--muted)">${op.dispatch||'—'}</td>
-      <td>${op.svc_start||'—'} <span style="color:var(--muted)">→</span> ${op.svc_end||'—'}</td>
-      <td style="font-size:11px">${noseCell}</td>
-      <td><button class="run-stop-remove" onclick="openRunEditor('${t.team_id}','${op.flight}',event)" style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 8px">Edit</button></td>
-    </tr>`;
-
-    // Inbound / turn detail sub-row — shown for ALL flights with an inbound_flight
-    if (op.inbound_flight) {
-      const groundMins = op.ground_mins || op.ground_time || '';
-      const groundLabel = typeof groundMins === 'number' && groundMins > 0
-        ? `${groundMins} min ground` : (groundMins ? String(groundMins) : '');
-      rows += `<tr class="row-turn-detail">
-        <td></td>
-        <td colspan="10" style="padding:4px 10px 8px 10px">
-          <span class="turn-label">↩ Inbound</span>
-          <span class="turn-val" style="margin-left:6px">AA${op.inbound_flight}</span>
-          ${op.inbound_origin ? `<span class="turn-muted" style="margin-left:6px">from ${op.inbound_origin}</span>` : ''}
-          ${op.inbound_sta   ? `<span class="turn-label" style="margin-left:10px">STA</span><span class="turn-val" style="margin-left:4px">${op.inbound_sta}</span>` : ''}
-          ${groundLabel      ? `<span class="turn-label" style="margin-left:10px">Ground</span><span class="turn-val" style="margin-left:4px">${groundLabel}</span>` : ''}
-        </td>
-      </tr>`;
+    // Thin spacer between runs (not before first run)
+    if (isFirstInRun && idx > 0) {
+      rows += `<tr style="background:#F1F5F9"><td colspan="15" style="height:3px;padding:0;border-bottom:1px solid #D1D9E8"></td></tr>`;
     }
+
+    // INBOUND cell — inline, no sub-row
+    const inboundCell = isTurn
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap">
+           <span style="font-size:9px;font-weight:700;padding:1px 4px;background:#FEF3C7;color:#92400E;border-radius:3px;letter-spacing:.04em;white-space:nowrap">↩ TURN</span>
+           <span style="color:#92400E;font-weight:600;font-family:var(--mono)">${op.inbound_origin||'?'}</span>
+           <span style="color:#9CA3AF;font-size:10px;font-family:var(--mono)">${op.inbound_sta||''}</span>
+         </span>`
+      : `<span style="color:#CBD5E1;font-size:10px">RON</span>`;
+
+    // TYPE cell
+    const typeHtml = (op.is_intl && !op.is_precleared)
+      ? `<span style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;background:#EDE9FE;color:#5B21B6">INTL</span>`
+      : `<span style="color:#9CA3AF;font-size:10px">DOM</span>`;
+
+    // STD cell — strikethrough if delayed
+    const stdCell = op.delayed
+      ? `<span style="color:#92400e;font-weight:700">${op.std}</span> <span style="font-size:10px;color:var(--muted);text-decoration:line-through">${op.original_std||''}</span>`
+      : `<strong>${op.std||'—'}</strong>`;
+
+    // Run size badge — first stop only
+    const runSize = runSizeMap[dispKey] || 1;
+    const runSizeHtml = isFirstInRun
+      ? (runSize > 1
+          ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#DBEAFE;color:#1D4ED8;font-size:9px;font-weight:800">${runSize}</span>`
+          : `<span style="color:#D1D5DB;font-size:10px">1</span>`)
+      : `<span style="color:#E2E8F0;font-size:10px">↓</span>`;
+
+    // NOTES badges
+    const noteParts = [];
+    if (op.is_ron)        noteParts.push(['RON',        '#DBEAFE','#1D4ED8',600]);
+    if (op.is_wb)         noteParts.push(['WIDEBODY',   '#E9D5FF','#6B21A8',600]);
+    if (op.is_precleared) noteParts.push(['PRECLEARED', '#D1FAE5','#065F46',600]);
+    if (op.is_tight_turn) noteParts.push(['TIGHT TURN', '#FEE2E2','#7F1D1D',800]);
+    else if (op.is_short_turn) noteParts.push(['SHORT TURN','#FEE2E2','#991B1B',600]);
+    if (op.delayed)       noteParts.push([`+${op.delay_mins||'?'}m`,'#FEF3C7','#92400E',700]);
+    if (op.auto_reassigned) noteParts.push(['REASGN',   '#F3F4F6','#374151',600]);
+    if (op.rescued)       noteParts.push(['RESCUED',    '#ECFDF5','#065F46',600]);
+    const notesHtml = noteParts.map(([lbl,bg,cl,fw]) =>
+      `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:${fw};letter-spacing:.02em;background:${bg};color:${cl};margin-right:2px;white-space:nowrap">${lbl}</span>`
+    ).join('');
+
+    rows += `<tr data-flight="${op.flight}" data-dest="${op.dest||''}" style="background:${rowBg}">
+      <td style="text-align:center;width:28px;font-size:11px;font-weight:${isFirstInRun?700:400};color:${isFirstInRun?'#1D4ED8':'#9CA3AF'}">${runNum}</td>
+      <td style="font-weight:700;color:${isTurn?'#92400E':'var(--accent)'};font-family:var(--mono)">${op.flight}</td>
+      <td style="color:#6B7280;font-family:var(--mono);font-size:11px">${op.nose||'—'}</td>
+      <td style="font-weight:800;font-size:13px;letter-spacing:.02em">${op.gate||'—'}</td>
+      <td style="color:#6B7280;font-size:11px">${op.equip||'—'}</td>
+      <td>${inboundCell}</td>
+      <td style="font-weight:700">${op.dest||'—'}</td>
+      <td style="font-family:var(--mono)">${stdCell}</td>
+      <td>${typeHtml}</td>
+      <td style="font-family:var(--mono);color:${isFirstInRun?'#111827':'#CBD5E1'};font-weight:${isFirstInRun?600:400}">${isFirstInRun?(op.dispatch||'—'):''}</td>
+      <td style="font-family:var(--mono)">${op.svc_start||'—'} <span style="color:#9CA3AF">→</span> ${op.svc_end||'—'}</td>
+      <td style="text-align:center;width:32px">${runSizeHtml}</td>
+      <td style="text-align:center;color:#9CA3AF;font-size:10px;width:36px">${isFirstInRun?runNum:''}</td>
+      <td>${notesHtml}</td>
+      <td style="text-align:right;padding-right:10px;white-space:nowrap"><button class="run-stop-remove" onclick="openRunEditor('${t.team_id}','${op.flight}',event)" style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 8px">Edit</button></td>
+    </tr>`;
   });
 
   return `
@@ -3605,16 +3658,20 @@ function buildTeamCard(t) {
     </div>
     <table class="tdc-table">
       <thead><tr>
-        <th>#</th>
-        <th>Flight</th>
-        <th>Dest</th>
-        <th>Type</th>
-        <th>Gate</th>
-        <th>Equip</th>
+        <th style="width:28px">#</th>
+        <th>FLIGHT</th>
+        <th>NOSE</th>
+        <th>GATE</th>
+        <th>EQP</th>
+        <th>INBOUND</th>
+        <th>TO</th>
         <th>STD</th>
-        <th>Dispatch</th>
-        <th>Service Window</th>
-        <th>Nose</th>
+        <th>TYPE</th>
+        <th>DISPATCH</th>
+        <th>SERVICE WINDOW</th>
+        <th style="width:32px;text-align:center">RUN</th>
+        <th style="width:36px;text-align:center">BATCH</th>
+        <th>NOTES</th>
         <th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
@@ -3989,9 +4046,9 @@ function renderResults(data) {
   // Enable Live Ops buttons for managers/supervisors on any loaded schedule
   const role = currentUser ? currentUser.role : 'agent';
   if (role === 'manager' || role === 'supervisor' || role === 'admin') {
-    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export'].forEach(id => {
+    ['btn-sick','btn-delay','btn-gate','btn-move','btn-export','btn-export-coord'].forEach(id => {
       const btn = document.getElementById(id);
-      if (btn) btn.disabled = false;
+      if (btn) { btn.disabled = false; btn.style.display = ''; }
     });
     const hint = document.getElementById('live-ops-hint');
     if (hint) hint.style.display = 'none';
@@ -5992,6 +6049,8 @@ function applyRoleUI(role) {
   if (allowedFeat.indexOf('export') < 0) {
     var expBtn = document.querySelector('[onclick*="exportExcel"]');
     if (expBtn) expBtn.style.display = 'none';
+    var coordBtn = document.getElementById('btn-export-coord');
+    if (coordBtn) coordBtn.style.display = 'none';
   }
 }
 
