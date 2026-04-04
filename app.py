@@ -713,26 +713,80 @@ def live_undo_last():
 
 
 from export import generate_excel
+from export_coord import generate_coord_excel
 
 @app.route('/api/export', methods=['POST'])
 def export():
-    """Generate and download the 9-tab Excel workbook."""
+    """Generate and download the 9-tab Excel workbook.
+    Accepts either session_id (Mac live session) or schedule_data (Render loaded schedule).
+    """
     try:
         data = request.get_json()
         session_id = data.get('session_id')
 
-        session = load_session(session_id)
-        if not session:
+        # Try session first (Mac), fall back to inline schedule_data (Render)
+        session = load_session(session_id) if session_id else None
+        if session:
+            result     = session['result']
+            change_log = session.get('change_log', [])
+            day        = session.get('day', session.get('day_of_week', 'Saturday'))
+        elif data.get('schedule_data'):
+            result     = data['schedule_data']
+            change_log = result.get('_change_log', [])
+            day        = data.get('day_of_week', 'Saturday')
+        else:
             return jsonify({'error': 'Session not found — regenerate schedule first'}), 404
-
-        result     = session['result']
-        change_log = session.get('change_log', [])
-        day        = session.get('day', 'Saturday')
 
         xlsx_bytes = generate_excel(result, change_log)
 
         date_str = __import__('datetime').datetime.now().strftime('%Y%m%d_%H%M')
         filename = f"PHL_Catering_{day}_{date_str}.xlsx"
+
+        from flask import Response
+        return Response(
+            xlsx_bytes,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/api/export/coord', methods=['POST'])
+def export_coord():
+    """Generate and download the COORD + INT'L COORD + Health Check Excel workbook.
+    Accepts either session_id (Mac live session) or schedule_data (Render loaded schedule).
+    """
+    try:
+        data       = request.get_json()
+        session_id = data.get('session_id')
+
+        # Try session first (Mac), fall back to inline schedule_data (Render)
+        session = load_session(session_id) if session_id else None
+        if session:
+            result = session['result']
+            day    = session.get('day', session.get('day_of_week', ''))
+            date   = session.get('schedule_date', '')
+        elif data.get('schedule_data'):
+            result = data['schedule_data']
+            day    = data.get('day_of_week', '')
+            date   = data.get('schedule_date', '')
+        else:
+            return jsonify({'error': 'Session not found — regenerate schedule first'}), 404
+
+        # Convert "2026-03-26" → "26 Mar 2026" for the title bar
+        try:
+            import datetime as _dt
+            date_label = _dt.datetime.strptime(date, '%Y-%m-%d').strftime('%-d %b %Y')
+        except Exception:
+            date_label = date
+
+        xlsx_bytes = generate_coord_excel(result, day_label=day, date_label=date_label)
+
+        date_str = __import__('datetime').datetime.now().strftime('%Y%m%d_%H%M')
+        filename = f"PHL_COORD_{day}_{date_str}.xlsx"
 
         from flask import Response
         return Response(
@@ -1168,18 +1222,31 @@ def confirm_schedule(schedule_date):
         if not result:
             return jsonify({'error': 'No schedule found for this date — generate first'}), 404
 
-        # ── Step 2: Save full result to daily_schedules with status=confirmed
-        try:
-            from schedule_store import save_schedule as _ss
-            _ss(schedule_date, 'combined', result, day_of_week or '',
-                created_by=user['user_id'],
-                status='confirmed')
-            print(f"[confirm] ✓ Saved to daily_schedules: {schedule_date} confirmed")
-        except Exception as _e:
+        # ── Step 2: Save full result to daily_schedules with status='live'
+        # DB constraint allows: draft | live | past  ('confirmed' is not valid)
+        # Use 'morning' as shift — 'combined' violates daily_schedules_shift_check constraint.
+        # The full day result is stored regardless; shift='morning' is just the DB key.
+        saved = False
+        last_err = None
+        for shift_val in ['morning', 'afternoon', 'combined']:
+            try:
+                from schedule_store import save_schedule as _ss
+                _ss(schedule_date, shift_val, result, day_of_week or '',
+                    created_by=user['user_id'],
+                    status='live')
+                print(f"[confirm] ✓ Saved to daily_schedules: {schedule_date} shift={shift_val} status=live")
+                saved = True
+                break
+            except Exception as _e:
+                last_err = _e
+                print(f"[confirm] save attempt shift={shift_val} failed: {_e}")
+                continue
+
+        if not saved:
             import traceback as _tb
-            print(f"[confirm] save failed: {_e}")
+            print(f"[confirm] all shift values failed. Last error: {last_err}")
             print(_tb.format_exc())
-            return jsonify({'error': f'Failed to save: {str(_e)}'}), 500
+            return jsonify({'error': f'Failed to save: {str(last_err)}'}), 500
 
         # ── Step 3: Log the confirmation
         try:
@@ -1253,15 +1320,12 @@ def daily_liveops(schedule_date, shift):
         # Load current schedule from Supabase
         # Try 'combined' first (how Confirm saves it), then the requested shift
         from schedule_store import load_schedule, update_schedule_result, log_modification
-        # Try all valid shift values — confirm saves as 'morning' (combined violates constraint)
-        rec = (load_schedule(schedule_date, 'combined') or
-               load_schedule(schedule_date, 'morning') or
-               load_schedule(schedule_date, 'afternoon'))
+        rec = load_schedule(schedule_date, 'combined') or load_schedule(schedule_date, shift)
         if not rec:
             return jsonify({'error': f'No confirmed schedule found for {schedule_date}. '
                                      'Generate and Confirm a schedule on the Mac first.'}), 404
-        # Use the actual shift from the record for the update
-        shift = rec.get('shift', 'morning')
+        # Use the actual shift from the record
+        shift = rec.get('shift', shift)
 
         # Apply the live op using existing live_ops engine
         from live_ops import handle_sick_call, handle_delay, apply_delay, handle_reassign, handle_gate_change
