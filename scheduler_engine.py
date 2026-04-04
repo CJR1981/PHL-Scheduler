@@ -40,6 +40,7 @@ TEAM_MIN_TURNAROUND  = 5    # [CONFIRMED]
 TEAM_READY_OFFSET    = 15   # minutes after shift start before first assignment
 
 MAX_INTL_STD_GAP     = 35
+TIGHT_BATCH_WINDOW   = 20   # STD gap (min) for same-bank concurrent grouping (manual pattern)
 MAX_RUN_SIZE_DOM     = 3
 MAX_RUN_SIZE_INTL_NB = 2
 
@@ -66,6 +67,17 @@ TIGHT_TURN_MAX_GND = 50   # ground time (min) threshold — below this uses FINI
 WIDEBODY   = {'7878','7879','789P','789W'}
 INTL_TYPES = {'International','Precleared'}
 
+# INTL-dedicated teams (TRK 22–28 on the INT'L COORD sheet).
+# Manual schedule analysis (Mar17/Mar25/Mar26): these teams ONLY appear on the
+# INT'L COORD sheet and never carry domestic flights.
+# Hard cap = 2 WB INTL ops per team, matching the observed ceiling from the manual
+# schedule (TM220 had 2 on Mar17; every other INTL team had exactly 1).
+# This prevents the solver from stacking 3–4 WB INTL flights on a single team,
+# which has never appeared in any manually produced schedule and is operationally
+# too tight for a single crew given 40-60 min service times + A-concourse drive.
+INTL_DEDICATED_TEAMS = {'TM218','TM219','TM220','TM221','TM222','TM223','TM224'}
+INTL_DEDICATED_CAP   = 2   # max WB INTL ops per dedicated team — hard constraint
+
 # Destinations that are unambiguously US domestic — override CSV Type field if
 # the source data incorrectly marks them as International.
 # TPA (Tampa) and similar continental US airports occasionally appear as
@@ -80,8 +92,12 @@ FORCE_DOMESTIC_DESTS = {
 
 # Firehouse (standby) team IDs — excluded from main CP-SAT solve,
 # used as last-resort tier in greedy rescue and delay swap analysis.
-# TM100 = U00 FH morning (05:00–11:00), TM106 = U30 FH afternoon (15:00–21:00).
-FH_TEAMS = {'TM100', 'TM106'}
+# NOTE: TM100 and TM106 have been retired from this set (Stage 1 alignment).
+# Manual schedule analysis (Mar25/Mar26) confirms both are regular working teams:
+#   TM100 (TRK 10): PT AM, 4 ops/day, 07:15–09:00 window — not standby.
+#   TM106 (TRK 31): PT Late, 3 ops/day, 18:40–19:05 window — not standby.
+# The real "Firehouse" overflow function is handled by the greedy rescue pass.
+FH_TEAMS: set = set()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VIEW CLASSIFICATION — Morning / Afternoon / WB International
@@ -491,6 +507,13 @@ class Run:
     def is_intl(self): return any(f.is_intl for f in self.flights)
     @property
     def is_dom(self):  return all(not f.is_intl for f in self.flights)
+    @property
+    def is_tight_batch(self):
+        """True when all flights depart within TIGHT_BATCH_WINDOW of each other.
+        Models the manual scheduler's same-bank concurrent servicing pattern."""
+        if len(self.flights) < 2: return False
+        stds = [f.std for f in self.flights]
+        return max(stds) - min(stds) <= TIGHT_BATCH_WINDOW
 
     def truck_busy(self) -> int:
         """DOCK_RELOAD + drive_to_first + sum(svc) + sum(g2g) + drive_back_from_last"""
@@ -593,33 +616,58 @@ def build_runs(flights: List[Flight]) -> List[Run]:
             min_latest = min(min_latest, floor_dispatch)
         return min_latest
 
-    def can_add(current_run, candidate):
+    def can_add(current_run, candidate, max_std_gap=TIGHT_BATCH_WINDOW):
         if len(current_run) >= 3: return False
         if tight(candidate): return False
         if any(tight(f) for f in current_run): return False
         last_std = max(f.std for f in current_run)
-        if abs(candidate.std - last_std) > 90: return False
+        if abs(candidate.std - last_std) > max_std_gap: return False
         return run_latest_dispatch(current_run + [candidate]) >= 0
 
-    # ── DOM: greedy grouper ───────────────────────────────────────────────
-    used_dom = set()
-    dom_groups = []
+    # ── DOM: two-tier greedy grouper ─────────────────────────────────────────
+    # Pass A — tight batches (≤ TIGHT_BATCH_WINDOW min STD gap).
+    # Models the manual scheduler's same-bank concurrent servicing: one team
+    # loads 2–3 aircraft departing in the same ~20-minute window.
+    # Pass B — loose batches (≤ 90 min) for any flights that couldn't form a
+    # tight group. These still benefit from multi-stop efficiency but are treated
+    # as lower-preference in the objective (500 pts vs 700 pts per extra stop).
+    used_dom   = set()
+    tight_groups = []
 
     for f in dom:
         if f.flight_num in used_dom: continue
         added = False
-        for r in dom_groups:
-            if can_add(r, f):
+        for r in tight_groups:
+            if can_add(r, f, TIGHT_BATCH_WINDOW):
                 r.append(f)
                 used_dom.add(f.flight_num)
                 added = True
                 break
         if not added:
-            dom_groups.append([f])
+            tight_groups.append([f])
             used_dom.add(f.flight_num)
 
-    # Add grouped runs (triples + pairs) + solo fallback for EVERY DOM flight
-    # Step 1: emit the greedy-grouped runs (triples first, then any pairs)
+    # Collect flights that are still solo after tight pass — try a loose group
+    solo_residuals = [g[0] for g in tight_groups if len(g) == 1]
+    used_loose = set()
+    loose_groups = []
+    for f in solo_residuals:
+        if f.flight_num in used_loose: continue
+        added = False
+        for r in loose_groups:
+            if can_add(r, f, 90):
+                r.append(f)
+                used_loose.add(f.flight_num)
+                added = True
+                break
+        if not added:
+            loose_groups.append([f])
+            used_loose.add(f.flight_num)
+
+    # Combined: multi-flight tight batches + all loose groups (multi + solo residuals)
+    dom_groups = [g for g in tight_groups if len(g) > 1] + loose_groups
+
+    # Emit grouped runs + solo fallback for EVERY DOM flight
     grouped_flights = set()
     for flight_list in dom_groups:
         if len(flight_list) > 1:
@@ -733,7 +781,7 @@ def build_teams(ft_csv=None, pt_csv=None, day_of_week='Saturday'):
     if not raw:
         raw=[('TM200',t2m('03:00'),t2m('11:30'),6,'FT'),('TM201',t2m('04:00'),t2m('12:30'),6,'FT'),
              ('TM202',t2m('05:00'),t2m('13:30'),6,'FT'),('TM203',t2m('05:00'),t2m('13:30'),6,'FT'),
-             ('TM204',t2m('05:00'),t2m('13:30'),6,'FT'),('TM100',t2m('05:00'),t2m('11:00'),4,'FH'),
+             ('TM204',t2m('05:00'),t2m('13:30'),6,'FT'),('TM100',t2m('05:00'),t2m('11:00'),4,'PT'),
              ('TM101',t2m('05:00'),t2m('11:00'),4,'PT'),('TM205',t2m('06:00'),t2m('14:30'),6,'FT'),
              ('TM206',t2m('06:00'),t2m('14:30'),6,'FT'),('TM207',t2m('07:00'),t2m('15:30'),6,'FT'),
              ('TM208',t2m('07:00'),t2m('15:30'),6,'FT'),('TM102',t2m('08:00'),t2m('14:00'),4,'PT'),
@@ -745,7 +793,7 @@ def build_teams(ft_csv=None, pt_csv=None, day_of_week='Saturday'):
              ('TM220',t2m('13:00'),t2m('21:30'),6,'FT'),('TM104',t2m('14:00'),t2m('20:00'),4,'PT'),
              ('TM105',t2m('14:00'),t2m('20:00'),4,'PT'),('TM221',t2m('14:00'),t2m('22:30'),6,'FT'),
              ('TM222',t2m('14:00'),t2m('22:30'),6,'FT'),('TM223',t2m('14:00'),t2m('22:30'),6,'FT'),
-             ('TM224',t2m('14:00'),t2m('22:30'),6,'FT'),('TM106',t2m('15:00'),t2m('21:00'),4,'FH'),
+             ('TM224',t2m('14:00'),t2m('22:30'),6,'FT'),('TM106',t2m('15:00'),t2m('21:00'),4,'PT'),
              ('TM107',t2m('15:00'),t2m('21:00'),4,'PT'),('TM108',t2m('15:00'),t2m('21:00'),4,'PT'),
              ('TM110',t2m('23:00'),t2m('05:00')+1440,3,'OVERNIGHT'),
              ('TM111',t2m('23:00'),t2m('05:00')+1440,3,'OVERNIGHT')]
@@ -857,6 +905,14 @@ def _solve_core(flights: List[Flight], teams: List[Team],
                 flight_costs.append(run_active[(r_idx,j)] * len(run.flights))
         if flight_costs:
             model.Add(sum(flight_costs) <= t.cap)
+
+        # Hard cap for INTL-dedicated teams.
+        # Manual schedule ceiling = 2 WB INTL ops per team (TM218–TM224).
+        # The general cap above allows up to 6, which lets the solver stack 3–4
+        # WB INTL flights on one team — never seen in any manual schedule and
+        # operationally infeasible given 40-60 min svc + A-concourse drive times.
+        if t.team_id in INTL_DEDICATED_TEAMS and flight_costs:
+            model.Add(sum(flight_costs) <= INTL_DEDICATED_CAP)
 
     # ── Interval variables: team and truck ─────────────────────────────────
     team_intervals  = {j:[] for j in range(M)}
@@ -1017,18 +1073,20 @@ def _solve_core(flights: List[Flight], teams: List[Team],
             model.Add(sum(flight_covered[i]) == 0).OnlyEnforceIf(covered.Not())
             total_flights.append(covered)
 
-    # Grouping bonus: reward multi-stop runs for truck efficiency
-    # 500 pts per extra stop: pair=500, triple=1000
-    # Strong enough that solver always prefers triple over 3 solos when feasible
-    # (1000 bonus > any combination of balance adjustments)
+    # Grouping bonus: reward multi-stop runs for truck efficiency.
+    # Tight batch (all flights within TIGHT_BATCH_WINDOW): 700 pts per extra stop.
+    # Loose batch (up to 90 min spread): 500 pts per extra stop.
+    # Both rates are strong enough that solver prefers grouped > solo when feasible.
+    # The 200-pt premium for tight batches aligns grouping preference with the
+    # manual scheduler's same-bank concurrent servicing pattern.
     grouping_bonus = []
     for r_idx, run in enumerate(runs):
         extra_stops = len(run.flights) - 1
         if extra_stops > 0:
+            bonus_rate = 700 if run.is_tight_batch else 500
             for j in range(M):
                 if (r_idx,j) in run_active:
-                    # Direct coefficient — no extra IntVar
-                    grouping_bonus.append(extra_stops * 500 * run_active[(r_idx,j)])
+                    grouping_bonus.append(extra_stops * bonus_rate * run_active[(r_idx,j)])
 
     # Smart balance: diminishing returns per team
     # FT target = 4.  Reward: flights 1-4 → 300pts each, flight 5 → 50pts
@@ -1130,6 +1188,84 @@ def _solve_core(flights: List[Flight], teams: List[Team],
             if penalty_pts != 0:
                 # Direct coefficient — no extra IntVar needed
                 phase_penalties.append(penalty_pts * run_active[(r_idx, j)])
+
+    # ── INTL-dedicated team domestic penalty ───────────────────────────────
+    # TM218–TM224 (TRK 22–28) are reserved for the European widebody INTL bank
+    # (19:20–22:15). Manual schedule analysis shows these teams NEVER appear on
+    # the domestic COORD sheet — they are exclusively on the INT'L COORD sheet.
+    # Penalty: -500 pts/flight (calibrated from Mar17 data — -300 was insufficient
+    # but -700 caused coverage to drop 0.8% by blocking INTL teams from domestic
+    # flights that had no other coverage. -500 represents the balance point: INTL
+    # teams are a genuine last resort for domestic, used only when all FT PM and
+    # PT Late capacity is exhausted. Falls back gracefully if needed.
+    # Note: INTL_DEDICATED_TEAMS defined at module level (also used for hard cap above).
+    intl_evening_exists = any(f.is_true_intl and f.std >= 18 * 60 for f in flights)
+    if intl_evening_exists:
+        for r_idx, run in enumerate(runs):
+            has_domestic = any(not f.is_true_intl for f in run.flights)
+            if not has_domestic:
+                continue
+            for j, t in enumerate(teams):
+                if t.team_id not in INTL_DEDICATED_TEAMS:
+                    continue
+                if (r_idx, j) not in run_active:
+                    continue
+                phase_penalties.append(-500 * len(run.flights) * run_active[(r_idx, j)])
+
+    # ── PT Late first-op timing discipline ────────────────────────────────
+    # Manual schedule: TM104/TM105 (TRK 29–30) first dispatch never before 17:30.
+    # These teams spend 14:00–17:30 on cart loading — not dispatching to flights.
+    # Penalty: -350 pts/flight (calibrated from Mar17 data — -200 caused TM105 first
+    # op at 15:35. At -350 the solver strongly avoids pre-17:30 work for these teams
+    # while still falling back if no other afternoon team is available.
+    PT_LATE_EARLY_TEAMS  = {'TM104', 'TM105'}
+    PT_LATE_FLOOR        = 17 * 60 + 30   # 17:30
+    for r_idx, run in enumerate(runs):
+        run_latest_d = run.latest_feasible_dispatch()
+        if run_latest_d >= PT_LATE_FLOOR:
+            continue   # flight is fine for these teams — no penalty
+        for j, t in enumerate(teams):
+            if t.team_id not in PT_LATE_EARLY_TEAMS:
+                continue
+            if (r_idx, j) not in run_active:
+                continue
+            phase_penalties.append(-350 * len(run.flights) * run_active[(r_idx, j)])
+
+    # ── TM205 domestic widebody specialist preference ───────────────────────
+    # Manual schedule: TM205 (TRK 6) is the domestic widebody specialist.
+    # Both Mar25 and Mar26 show identical pattern: PHX(788) ~08:45 + DFW(789) ~14:00.
+    # Only 2 ops/day — one WB per bank. Never assigned narrowbody domestic.
+    #
+    # Two-sided approach (calibrated from Mar17 data — one-sided +400 was insufficient;
+    # WB flights went to TM200/TM210 instead of TM205):
+    #   Bonus:   +400 pts/flight when TM205 is assigned a domestic WB run.
+    #   Penalty: -150 pts/flight when TM205 is assigned a domestic NB run (WB exists).
+    #   Counter: -400 pts/flight when ANY OTHER team takes a domestic WB run AND
+    #            TM205 has capacity (shift covers the flight). This creates a 800-pt
+    #            differential that reliably routes WB domestic to TM205.
+    WB_DOM_SPECIALIST    = {'TM205'}
+    wb_dom_flights_exist = any(f.is_wb and not f.is_true_intl for f in flights)
+    if wb_dom_flights_exist:
+        # Find TM205 team index for shift-window check
+        tm205_idx = next((j for j, t in enumerate(teams) if t.team_id == 'TM205'), None)
+        for r_idx, run in enumerate(runs):
+            has_wb_dom = any(f.is_wb and not f.is_true_intl for f in run.flights)
+            has_nb_dom = any(not f.is_wb and not f.is_true_intl for f in run.flights)
+            for j, t in enumerate(teams):
+                if (r_idx, j) not in run_active:
+                    continue
+                if t.team_id in WB_DOM_SPECIALIST:
+                    # TM205 itself: reward WB, discourage NB
+                    if has_wb_dom:
+                        phase_penalties.append(400 * len(run.flights) * run_active[(r_idx, j)])
+                    elif has_nb_dom:
+                        phase_penalties.append(-150 * len(run.flights) * run_active[(r_idx, j)])
+                else:
+                    # Non-TM205 teams: penalise taking DOM WB when TM205 is viable
+                    if has_wb_dom:
+                        tm205_viable = (tm205_idx is not None and (r_idx, tm205_idx) in run_active)
+                        if tm205_viable:
+                            phase_penalties.append(-350 * len(run.flights) * run_active[(r_idx, j)])
 
     # ── Soft target rewards (replaces all hard floor constraints in pass 0) ──
     # OVERNIGHT target=2: 400 pts each flight toward target (strong pull, small fleet)
@@ -1262,7 +1398,7 @@ def _solve_core(flights: List[Flight], teams: List[Team],
                     'flight':f.flight_num,'dest':f.dest,'std':m2t(f.std),'std_min':f.std,
                     'type':f.dep_type,'equip':f.equip,'gate':f.gate,'is_ron':f.is_ron,'is_short_turn':f.is_short_turn,'is_tight_turn':f.is_tight_turn,'ground_mins':f.ground_mins,
                     'is_intl':f.is_intl,'is_precleared':f.is_precleared,'is_wb':f.is_wb,'team':t.team_id,
-                    'run_size':len(run.flights),'stop_num':k+1,
+                    'run_size':len(run.flights),'stop_num':k+1,'is_tight_batch':run.is_tight_batch,
                     'dock_load':m2t(dock_load),'dock_load_min':dock_load,
                     'dispatch':m2t(disp),
                     'svc_start':m2t(svc_s),'svc_end':m2t(svc_e),
@@ -1597,15 +1733,11 @@ def _greedy_rescue(unassigned: list, teams: list, team_ops: dict,
                            team_free.get(t.team_id, t.ready_at))
         )
 
-        # FH last-resort tier: only considered if no regular candidate succeeds.
-        fh_candidates = sorted(
-            [t for t in teams
-             if t.team_type == 'FH'
-             and t.shift_start <= latest_dispatch
-             and t.shift_end  >= latest_dispatch + svc + drv_t
-             and team_load.get(t.team_id, 0) < t.cap],
-            key=lambda t: team_free.get(t.team_id, t.ready_at)
-        )
+        # FH last-resort tier — intentionally empty since Stage 1 (Mar 2026).
+        # FH_TEAMS = set() means no team has type 'FH'; this list is always [].
+        # Retained as a zero-cost extension point: if a future ops mode re-introduces
+        # a dedicated standby team with type='FH', it will work without code changes.
+        fh_candidates: list = []
 
         for t in candidates + fh_candidates:
             tf = team_free.get(t.team_id, t.ready_at)
@@ -1784,11 +1916,10 @@ def solve(flights: List[Flight], teams: List[Team],
     """
     MAX_ITERS     = 3      # max rebalance passes
     STDDEV_TARGET = 0.90   # stop when utilisation stddev < this
-    # Time budget: 70% initial, 10% per rebalance pass.
-    # Initial solve gets the lion's share — on slower hardware (Render free tier)
-    # this ensures the solver reaches OPTIMAL before rebalancing kicks in.
-    # With time_limit=240: initial=168s, each rebalance=24s.
-    iter_times = [int(time_limit * 0.70)] + [int(time_limit * 0.10)] * MAX_ITERS
+    # Time budget: 60% initial, 13% per rebalance pass (leaves headroom for greedy rescue).
+    # Previously 45%/18% — the full-day combined solve needs more initial budget because
+    # it's a strictly larger problem than the partial morning/afternoon splits.
+    iter_times = [int(time_limit * 0.60)] + [int(time_limit * 0.13)] * MAX_ITERS
     team_map   = {t.team_id: t for t in teams}
 
     best = _solve_core(flights, teams, truck_count, iter_times[0],
@@ -2148,3 +2279,246 @@ def solve_partial(flights, teams, time_limit=60):
                      'coverage_pct':round(100*len(assigned_set)/max(N,1),1),
                      'solve_time':round(solver.WallTime(),1)}}
     return apply_run_truck_ids(partial_result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCHEDULE HEALTH CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def health_check(result: dict) -> dict:
+    """
+    Pre-publish schedule health check.
+
+    Inspects the solver result and returns a structured report with findings
+    at four severity levels:
+
+        CRITICAL  — operationally invalid; must be resolved before publishing
+        HIGH      — likely problem; review recommended before publishing
+        MEDIUM    — worth noting; may be intentional or unavoidable
+        INFO      — background context for the coordinator
+
+    Returns
+    -------
+    {
+        'passed': bool,
+        'critical': [...],
+        'high':     [...],
+        'medium':   [...],
+        'info':     [...],
+        'summary':  str,
+    }
+
+    Each item in a severity list:
+        {'code': str, 'message': str, 'detail': str, 'flights': [...]}
+    """
+    assigns   = result.get('assignments', []) or []
+    unassigned = result.get('unassigned',  []) or []
+    stats     = result.get('stats', {})
+
+    critical, high, medium, info = [], [], [], []
+
+    WIDEBODY       = {'7878','7879','789P','789W'}
+    INTL_DEDICATED = {'TM218','TM219','TM220','TM221','TM222','TM223','TM224'}
+    PT_LATE_EARLY  = {'TM104','TM105'}
+    DOM_BUFFER_MIN = 30   # minimum acceptable inter-op gap (minutes)
+    fmt = lambda m: f"{int(m)//60:02d}:{int(m)%60:02d}"
+
+    # ── 1. Buffer violations ─────────────────────────────────────────────────
+    # Check: for each team, the team_free_min of run N must be ≤ dispatch_min of run N+1.
+    # Stops within the SAME run share a dispatch_min — we must group by run first,
+    # then compare across runs only.
+    from collections import defaultdict
+    by_team = defaultdict(list)
+    for a in assigns:
+        by_team[a.get('team','')].append(a)
+
+    for tid, ops in by_team.items():
+        # Group stops into runs by shared dispatch_min
+        by_run = defaultdict(list)
+        for a in ops:
+            by_run[a.get('dispatch_min', 0)].append(a)
+
+        sorted_runs = sorted(by_run.items())   # [(dispatch_min, [stops]), ...]
+        for i in range(len(sorted_runs) - 1):
+            curr_dmin, curr_stops = sorted_runs[i]
+            next_dmin, _          = sorted_runs[i + 1]
+            # Team is free after current run when the last stop's team_free_min is reached
+            free_at = max(a.get('team_free_min', 0) for a in curr_stops)
+            # Normalise overnight times to comparable range
+            free_at_norm = free_at % 1440
+            next_norm    = next_dmin % 1440
+            # Only flag if free_at is genuinely after next dispatch
+            if free_at > next_dmin:
+                gap = free_at - next_dmin
+                flights = [a['flight'] for a in curr_stops]
+                next_flights = [a['flight'] for a in sorted_runs[i+1][1]]
+                critical.append({
+                    'code': 'BUFFER_VIOLATION',
+                    'message': (f"{tid}: team still busy at {fmt(free_at % 1440)} "
+                                f"when next run dispatches at {fmt(next_dmin % 1440)} "
+                                f"({gap}min overlap)"),
+                    'detail':  (f"Run ending {flights} frees at {fmt(free_at % 1440)}. "
+                                f"Next run {next_flights} dispatches at {fmt(next_dmin % 1440)}."),
+                    'flights': flights + next_flights,
+                })
+
+    # ── 2. Unassigned flights ────────────────────────────────────────────────
+    if unassigned:
+        morning_u = [u for u in unassigned if 7*60 <= u.get('std_min',0) < 9*60+30]
+        evening_u = [u for u in unassigned if 18*60 <= u.get('std_min',0) < 21*60+30]
+        intl_u    = [u for u in unassigned if u.get('is_intl') and not u.get('is_precleared')]
+        other_u   = [u for u in unassigned if u not in morning_u + evening_u + intl_u]
+
+        if intl_u:
+            high.append({
+                'code': 'INTL_UNASSIGNED',
+                'message': f"{len(intl_u)} international flight(s) unassigned",
+                'detail': 'International flights must be covered. Check INTL team capacity.',
+                'flights': [u['flight'] for u in intl_u],
+            })
+        if morning_u:
+            high.append({
+                'code': 'MORNING_BANK_UNASSIGNED',
+                'message': f"{len(morning_u)} unassigned in 07:00–09:30 morning bank",
+                'detail': 'Morning bank is capacity-constrained. These would go to FH overflow in manual schedule.',
+                'flights': [f"{u['flight']} {u.get('dest','')} {u.get('std','')}" for u in morning_u],
+            })
+        if evening_u:
+            high.append({
+                'code': 'EVENING_BANK_UNASSIGNED',
+                'message': f"{len(evening_u)} unassigned in 18:00–21:30 evening bank",
+                'detail': 'Evening bank gap. Check PT Late and FT PM capacity.',
+                'flights': [f"{u['flight']} {u.get('dest','')} {u.get('std','')}" for u in evening_u],
+            })
+        if other_u:
+            medium.append({
+                'code': 'OTHER_UNASSIGNED',
+                'message': f"{len(other_u)} unassigned flight(s) outside main banks",
+                'detail': 'Review capacity in affected time windows.',
+                'flights': [f"{u['flight']} {u.get('dest','')} {u.get('std','')}" for u in other_u],
+            })
+
+    # ── 3. Teams at 100% capacity ────────────────────────────────────────────
+    summary = result.get('summary', []) or []
+    maxed = [t for t in summary if t.get('flight_count',0) >= t.get('cap',99)]
+    if maxed:
+        medium.append({
+            'code': 'TEAMS_AT_CAP',
+            'message': f"{len(maxed)} team(s) at maximum capacity: {', '.join(t['team_id'] for t in maxed)}",
+            'detail': 'These teams have no slack for IROPS. Any flight added to their window will be unassigned.',
+            'flights': [],
+        })
+
+    # ── 4. PT Late first-op timing ───────────────────────────────────────────
+    FLOOR = 17*60 + 30
+    for tid in PT_LATE_EARLY:
+        ops = sorted([a for a in assigns if a.get('team')==tid], key=lambda a: a.get('dispatch_min',0))
+        if ops and ops[0].get('dispatch_min', FLOOR) < FLOOR:
+            first = ops[0]
+            medium.append({
+                'code': 'PT_LATE_EARLY_DISPATCH',
+                'message': f"{tid} first dispatch at {first.get('dispatch','?')} — before 17:30 target",
+                'detail': 'Manual pattern: TM104/105 first op never before 17:30 (cart loading 14:00–17:30). This may indicate PM capacity pressure.',
+                'flights': [first['flight']],
+            })
+
+    # ── 5. INTL dedicated teams taking domestic ──────────────────────────────
+    intl_dom_count = 0
+    intl_dom_flights = []
+    for a in assigns:
+        if a.get('team') in INTL_DEDICATED and not (a.get('is_intl') and not a.get('is_precleared')):
+            intl_dom_count += 1
+            intl_dom_flights.append(f"{a['flight']} {a.get('dest','')} {a.get('std','')} → {a.get('team')}")
+    if intl_dom_count > 0:
+        sev = medium if intl_dom_count <= 8 else high
+        sev.append({
+            'code': 'INTL_TEAM_DOMESTIC',
+            'message': f"{intl_dom_count} domestic op(s) assigned to INTL-dedicated teams (TM218–TM224)",
+            'detail': f"Manual pattern: these teams appear only on INT'L COORD. Domestic assignments indicate PM capacity pressure. {'Significant — consider OT or split shift.' if intl_dom_count > 8 else 'Within acceptable range.'}",
+            'flights': intl_dom_flights[:6],
+        })
+
+    # ── 6. WB domestic not on TM205 ─────────────────────────────────────────
+    wb_dom = [a for a in assigns if a.get('equip','') in WIDEBODY
+              and not (a.get('is_intl') and not a.get('is_precleared'))]
+    wb_not_tm205 = [a for a in wb_dom if a.get('team') != 'TM205']
+    # Exclude 07:00 flights — TM205 physically can't reach them (hard constraint)
+    wb_not_tm205_fixable = [a for a in wb_not_tm205 if a.get('std_min',0) >= 8*60]
+    if wb_not_tm205_fixable:
+        medium.append({
+            'code': 'WB_NOT_ON_TM205',
+            'message': f"{len(wb_not_tm205_fixable)} domestic WB flight(s) not on TM205 (WB specialist)",
+            'detail': 'Manual pattern: TM205 (TRK 6) handles domestic 788/789 flights exclusively. Verify TM205 shift and capacity.',
+            'flights': [f"{a['flight']} {a.get('dest','')} {a.get('std','')} → {a.get('team')}" for a in wb_not_tm205_fixable],
+        })
+
+    # ── 7. Short / tight turns ───────────────────────────────────────────────
+    tight_turns = [a for a in assigns if a.get('is_tight_turn')]
+    short_turns = [a for a in assigns if a.get('is_short_turn') and not a.get('is_tight_turn')]
+    if tight_turns:
+        medium.append({
+            'code': 'TIGHT_TURNS',
+            'message': f"{len(tight_turns)} tight-turn flight(s) — FINISH_BUF_TIGHT applied",
+            'detail': "Coordinator instruction: 'needs servicing regardless'. Very short ground windows — team must be pre-positioned.",
+            'flights': [f"{a['flight']} {a.get('dest','')} gnd={a.get('ground_mins','?')}min" for a in tight_turns],
+        })
+    if short_turns:
+        info.append({
+            'code': 'SHORT_TURNS',
+            'message': f"{len(short_turns)} short-turn flight(s) — FINISH_BUF_MIN applied",
+            'detail': "Ground time under 90 min. Standard buffer relaxed to 20 min.",
+            'flights': [f"{a['flight']} {a.get('dest','')} gnd={a.get('ground_mins','?')}min" for a in short_turns[:5]],
+        })
+
+    # ── 8. Quality score ─────────────────────────────────────────────────────
+    qs = stats.get('quality_score')
+    grade = stats.get('quality_grade','?')
+    if qs is not None:
+        coverage = stats.get('coverage_pct', 0)
+        info.append({
+            'code': 'QUALITY_SCORE',
+            'message': f"Schedule quality: {qs}/100 (grade {grade}) — coverage {coverage}%",
+            'detail': f"Components: coverage={stats.get('qs_coverage','?')} intl={stats.get('qs_intl','?')} workload={stats.get('qs_workload','?')} buffer={stats.get('qs_buffer','?')} truck={stats.get('qs_truck','?')}",
+            'flights': [],
+        })
+
+    # ── 9. Batch tightness ───────────────────────────────────────────────────
+    multi = [a for a in assigns if a.get('run_size',1) > 1]
+    if multi:
+        tight_batches = set()
+        loose_batches = set()
+        for a in multi:
+            key = (a.get('team'), a.get('dispatch_min',0))
+            if a.get('is_tight_batch'):
+                tight_batches.add(key)
+            else:
+                loose_batches.add(key)
+        total_multi = len(tight_batches) + len(loose_batches)
+        tight_pct = round(len(tight_batches) / max(total_multi,1) * 100)
+        info.append({
+            'code': 'BATCH_TIGHTNESS',
+            'message': f"Batch tightness: {len(tight_batches)}/{total_multi} multi-stop runs within 20-min window ({tight_pct}%)",
+            'detail': "Stage 2 target: ≥80% tight batches. Loose batches are still valid but less aligned with manual pattern.",
+            'flights': [],
+        })
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    passed = len(critical) == 0
+    total_issues = len(critical) + len(high) + len(medium)
+    if total_issues == 0:
+        summary_str = "✓ Schedule is clean — no issues found."
+    elif not passed:
+        summary_str = f"✗ CRITICAL issues present ({len(critical)}) — do not publish."
+    elif high:
+        summary_str = f"⚠ {len(high)} HIGH severity issue(s) — review before publishing."
+    else:
+        summary_str = f"ℹ {len(medium)} medium / {len(info)} info items — schedule is publishable."
+
+    return {
+        'passed':   passed,
+        'critical': critical,
+        'high':     high,
+        'medium':   medium,
+        'info':     info,
+        'summary':  summary_str,
+    }
