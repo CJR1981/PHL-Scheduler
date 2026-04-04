@@ -229,7 +229,14 @@ def _ensure_truck_min_fields(a: dict) -> dict:
 
 
 def apply_run_truck_ids(result: dict, truck_count: int = TRUCK_COUNT) -> dict:
-    """Assign stable run_id and backend truck_id for every run in a result payload."""
+    """Assign stable run_id and backend truck_id for every run in a result payload.
+
+    Truck assignment rules:
+    - WB INTL runs  → FLEET_21FT only (FL181, FL202, … FL268)
+    - All other runs → FLEET_16FT first; fall back to FLEET_21FT if 16ft exhausted
+    Each pool is managed independently so 21ft trucks are never wasted on domestic runs
+    when 16ft trucks are still available.
+    """
     if not isinstance(result, dict) or 'assignments' not in result:
         return result
 
@@ -249,40 +256,95 @@ def apply_run_truck_ids(result: dict, truck_count: int = TRUCK_COUNT) -> dict:
         ops_sorted = sorted(ops, key=lambda o: int(o.get('stop_num', 1)))
         first_flight = str(ops_sorted[0].get('flight'))
         run_id = f"R-{team_id}-{first_flight}"
-        start = min(int(o.get('dock_load_min', max(0, disp - DOCK_RELOAD))) for o in ops_sorted)
-        end = max(int(o.get('truck_free_min', disp)) for o in ops_sorted)
-        run_meta.append({'key': (team_id, disp), 'run_id': run_id, 'start': start, 'end': end})
+        start  = min(int(o.get('dock_load_min', max(0, disp - DOCK_RELOAD))) for o in ops_sorted)
+        end    = max(int(o.get('truck_free_min', disp)) for o in ops_sorted)
+        # Determine if run requires a 21ft truck (WB INTL)
+        needs_21ft = _run_requires_21ft(ops_sorted)
+        run_meta.append({
+            'key': (team_id, disp), 'run_id': run_id,
+            'start': start, 'end': end, 'needs_21ft': needs_21ft,
+        })
 
     run_meta.sort(key=lambda r: (r['start'], r['end'], r['run_id']))
-    trucks: List[Tuple[int, int]] = []  # (free_at, truck_num)
+
+    # Separate availability trackers for each pool
+    # Each entry: (free_at_min, fleet_index)
+    pool_16ft: List[Tuple[int, int]] = []   # indices into FLEET_16FT
+    pool_21ft: List[Tuple[int, int]] = []   # indices into FLEET_21FT
+    next_16ft = 0   # next unallocated FLEET_16FT slot
+    next_21ft = 0   # next unallocated FLEET_21FT slot
+
     run_to_truck: Dict[Tuple[str, int], str] = {}
-    next_truck_num = 1
 
     for r in run_meta:
-        assigned_idx = None
-        assigned_num = None
-        for idx, (free_at, tnum) in enumerate(trucks):
-            if free_at <= r['start']:
-                assigned_idx = idx
-                assigned_num = tnum
-                break
-        if assigned_num is None:
-            assigned_num = next_truck_num
-            next_truck_num += 1
-            trucks.append((r['end'], assigned_num))
+        start = r['start']
+
+        if r['needs_21ft']:
+            # Must use a 21ft truck
+            pool, pool_list, next_idx_attr = pool_21ft, FLEET_21FT, '21ft'
+            best_idx = None
+            for idx, (free_at, fidx) in enumerate(pool):
+                if free_at <= start:
+                    best_idx = idx
+                    break
+            if best_idx is not None:
+                _, fidx = pool[best_idx]
+                pool[best_idx] = (r['end'], fidx)
+            elif next_21ft < len(FLEET_21FT):
+                fidx = next_21ft; next_21ft += 1
+                pool_21ft.append((r['end'], fidx))
+            else:
+                # All 21ft trucks busy — flag with overflow marker
+                fidx = None
+            truck_id = FLEET_21FT[fidx] if fidx is not None else 'FL-21FT-OVERFLOW*'
+
         else:
-            trucks[assigned_idx] = (r['end'], assigned_num)
-        trucks.sort(key=lambda x: (x[0], x[1]))
-        run_to_truck[r['key']] = FLEET_ALL[assigned_num - 1] if assigned_num <= truck_count else f'FL{200 + assigned_num}*'
+            # Try 16ft pool first
+            best_idx = None
+            for idx, (free_at, fidx) in enumerate(pool_16ft):
+                if free_at <= start:
+                    best_idx = idx
+                    break
+            if best_idx is not None:
+                _, fidx = pool_16ft[best_idx]
+                pool_16ft[best_idx] = (r['end'], fidx)
+                truck_id = FLEET_16FT[fidx]
+            elif next_16ft < len(FLEET_16FT):
+                fidx = next_16ft; next_16ft += 1
+                pool_16ft.append((r['end'], fidx))
+                truck_id = FLEET_16FT[fidx]
+            else:
+                # 16ft exhausted — borrow from 21ft pool
+                best_idx = None
+                for idx, (free_at, fidx) in enumerate(pool_21ft):
+                    if free_at <= start:
+                        best_idx = idx
+                        break
+                if best_idx is not None:
+                    _, fidx = pool_21ft[best_idx]
+                    pool_21ft[best_idx] = (r['end'], fidx)
+                    truck_id = FLEET_21FT[fidx]
+                elif next_21ft < len(FLEET_21FT):
+                    fidx = next_21ft; next_21ft += 1
+                    pool_21ft.append((r['end'], fidx))
+                    truck_id = FLEET_21FT[fidx]
+                else:
+                    truck_id = 'FL-OVERFLOW*'
+
+        # Keep pools sorted by free_at so we always reuse the earliest-free truck
+        pool_16ft.sort(key=lambda x: x[0])
+        pool_21ft.sort(key=lambda x: x[0])
+
+        run_to_truck[r['key']] = truck_id
 
     for (team_id, disp), ops in runs.items():
-        meta = next(m for m in run_meta if m['key'] == (team_id, disp))
+        meta     = next(m for m in run_meta if m['key'] == (team_id, disp))
         truck_id = run_to_truck[(team_id, disp)]
         for o in ops:
-            o['run_id'] = meta['run_id']
-            o['truck_id'] = truck_id
+            o['run_id']       = meta['run_id']
+            o['truck_id']     = truck_id
             o['run_start_min'] = meta['start']
-            o['run_end_min'] = meta['end']
+            o['run_end_min']  = meta['end']
 
     team_ops: Dict[str, List[dict]] = {}
     for a in raw:
