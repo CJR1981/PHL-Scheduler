@@ -717,25 +717,18 @@ from export_coord import generate_coord_excel
 
 @app.route('/api/export', methods=['POST'])
 def export():
-    """Generate and download the 9-tab Excel workbook.
-    Accepts either session_id (Mac live session) or schedule_data (Render loaded schedule).
-    """
+    """Generate and download the 9-tab Excel workbook."""
     try:
         data = request.get_json()
         session_id = data.get('session_id')
 
-        # Try session first (Mac), fall back to inline schedule_data (Render)
-        session = load_session(session_id) if session_id else None
-        if session:
-            result     = session['result']
-            change_log = session.get('change_log', [])
-            day        = session.get('day', session.get('day_of_week', 'Saturday'))
-        elif data.get('schedule_data'):
-            result     = data['schedule_data']
-            change_log = result.get('_change_log', [])
-            day        = data.get('day_of_week', 'Saturday')
-        else:
+        session = load_session(session_id)
+        if not session:
             return jsonify({'error': 'Session not found — regenerate schedule first'}), 404
+
+        result     = session['result']
+        change_log = session.get('change_log', [])
+        day        = session.get('day', 'Saturday')
 
         xlsx_bytes = generate_excel(result, change_log)
 
@@ -757,24 +750,19 @@ def export():
 @app.route('/api/export/coord', methods=['POST'])
 def export_coord():
     """Generate and download the COORD + INT'L COORD + Health Check Excel workbook.
-    Accepts either session_id (Mac live session) or schedule_data (Render loaded schedule).
+    Mirrors the manual schedule document layout used by coordinators.
     """
     try:
         data       = request.get_json()
         session_id = data.get('session_id')
 
-        # Try session first (Mac), fall back to inline schedule_data (Render)
-        session = load_session(session_id) if session_id else None
-        if session:
-            result = session['result']
-            day    = session.get('day', session.get('day_of_week', ''))
-            date   = session.get('schedule_date', '')
-        elif data.get('schedule_data'):
-            result = data['schedule_data']
-            day    = data.get('day_of_week', '')
-            date   = data.get('schedule_date', '')
-        else:
+        session = load_session(session_id)
+        if not session:
             return jsonify({'error': 'Session not found — regenerate schedule first'}), 404
+
+        result = session['result']
+        day    = session.get('day', '')
+        date   = session.get('schedule_date', '')
 
         # Convert "2026-03-26" → "26 Mar 2026" for the title bar
         try:
@@ -807,13 +795,66 @@ def agent_chat():
         data        = request.get_json()
         session_id  = data.get('session_id')
         user_msg    = data.get('message', '').strip()
+        # Render: frontend may pass schedule_data directly when no in-memory session exists
+        inline_schedule = data.get('schedule_data')
 
         if not session_id or not user_msg:
             return jsonify({'error': 'session_id and message required'}), 400
 
         session = load_session(session_id)
+
+        # Render path: session_id is "{date}_combined" but no session in memory yet.
+        # Bootstrap a lightweight session from the inline schedule data sent by the frontend,
+        # OR try to load the persisted schedule from Supabase.
         if not session:
-            return jsonify({'error': 'Session expired — regenerate schedule first'}), 404
+            if inline_schedule:
+                # Frontend sent fullScheduleData — build a minimal session from it
+                from scheduler_engine import Flight as _Flight, Team as _Team
+                def _hhmm(s):
+                    s = str(s or '').strip().replace('–', '-').replace('—', '-')
+                    if ':' in s:
+                        hh, mm = s.split(':', 1); return int(hh)*60 + int(mm)
+                    return 0
+                recon_teams = []
+                for t in (inline_schedule.get('team_summary') or []):
+                    try:
+                        raw = t.get('shift','0500-1330').replace('–','-').replace('—','-')
+                        parts = raw.split('-')
+                        recon_teams.append(_Team(
+                            team_id=t['team_id'], shift_start=_hhmm(parts[0]),
+                            shift_end=_hhmm(parts[1]), cap=int(t.get('cap',8)),
+                            team_type=t.get('team_type','FT')))
+                    except Exception: pass
+                save_session(session_id, {
+                    'result': inline_schedule,
+                    'flights': [], 'teams': recon_teams,
+                    'shift': 'combined',
+                    'schedule_date': session_id.split('_')[0] if '_' in session_id else '',
+                    'sick_calls': inline_schedule.get('_sick_calls', []),
+                    'change_log': inline_schedule.get('_change_log', []),
+                    'agent_history': [],
+                })
+                session = load_session(session_id)
+            else:
+                # Try Supabase as last resort
+                try:
+                    from schedule_store import load_schedule
+                    parts = session_id.split('_')
+                    sdate = parts[0]; sshift = parts[1] if len(parts) > 1 else 'combined'
+                    rec = load_schedule(sdate, 'combined') or load_schedule(sdate, sshift)
+                    if rec:
+                        save_session(session_id, {
+                            'result': rec.get('result', {}),
+                            'flights': [], 'teams': [],
+                            'shift': sshift, 'schedule_date': sdate,
+                            'sick_calls': [], 'change_log': [], 'agent_history': [],
+                        })
+                        session = load_session(session_id)
+                except Exception:
+                    pass
+
+        if not session:
+            return jsonify({'error': 'No schedule loaded — open a schedule date first'}), 404
 
         from agent import run_agent_turn
 
