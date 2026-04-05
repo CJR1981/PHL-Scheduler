@@ -1466,16 +1466,39 @@ def daily_liveops(schedule_date, shift):
         reconstructed_flights = _reconstruct_flights(current_result)
         reconstructed_teams   = _reconstruct_teams(current_result)
 
+        # ── Normalize flight keys to strings throughout current_result ────────
+        # Supabase round-trips JSON integers (flight: 204) but live_ops Flight
+        # objects use str flight_num ("0204"). Mismatched types cause assignment
+        # lookups to silently fail, corrupting the schedule on every live op.
+        # Normalise ALL flight references to str before building the session.
+        def _str_flights(result):
+            import copy as _cp
+            r = _cp.deepcopy(result)
+            for row in r.get("assignments", []):
+                if "flight" in row: row["flight"] = str(row["flight"])
+            for row in r.get("unassigned", []):
+                if "flight" in row: row["flight"] = str(row["flight"])
+            new_ops = {}
+            for tid, ops in r.get("team_ops", {}).items():
+                new_ops[tid] = []
+                for op in ops:
+                    op2 = dict(op)
+                    if "flight" in op2: op2["flight"] = str(op2["flight"])
+                    new_ops[tid].append(op2)
+            r["team_ops"] = new_ops
+            return r
+        current_result = _str_flights(current_result)
+
         # Build an in-memory session for live_ops to work on
-        session_id = f'{schedule_date}_{shift}'
+        session_id = f"{schedule_date}_{shift}"
         save_session(session_id, {
-            'result':        current_result,
-            'flights':       reconstructed_flights,
-            'teams':         reconstructed_teams,
-            'shift':         shift,
-            'schedule_date': schedule_date,
-            'sick_calls':    current_result.get('_sick_calls', []),
-            'change_log':    current_result.get('_change_log', []),
+            "result":        current_result,
+            "flights":       reconstructed_flights,
+            "teams":         reconstructed_teams,
+            "shift":         shift,
+            "schedule_date": schedule_date,
+            "sick_calls":    current_result.get("_sick_calls", []),
+            "change_log":    current_result.get("_change_log", []),
         })
 
         result = {'error': 'Unknown operation'}
@@ -1491,7 +1514,7 @@ def daily_liveops(schedule_date, shift):
         elif op_type == 'delay':
             analysis = handle_delay(
                 session_id,
-                payload.get('flight'),
+                str(payload.get('flight') or ''),
                 payload.get('new_std') or payload.get('etd'),
                 reconstructed_flights,
                 reconstructed_teams,
@@ -1509,14 +1532,14 @@ def daily_liveops(schedule_date, shift):
         elif op_type == 'gate_change':
             result = handle_gate_change(
                 session_id,
-                payload.get('flight'),
+                str(payload.get('flight') or ''),
                 payload.get('new_gate') or payload.get('gate'),
                 reconstructed_flights,
                 reconstructed_teams,
             )
             summary = f"Gate change: AA{payload.get('flight')} → {payload.get('new_gate') or payload.get('gate')}"
         elif op_type == 'reassign':
-            result = handle_reassign(session_id, payload.get('flight'), payload.get('new_team') or payload.get('team'),
+            result = handle_reassign(session_id, str(payload.get('flight') or ''), payload.get('new_team') or payload.get('team'),
                                      reconstructed_flights, reconstructed_teams,
                                      force=payload.get('force', False))
             summary = f"Reassign: AA{payload.get('flight')} → {payload.get('new_team') or payload.get('team')}"
