@@ -122,7 +122,7 @@ COORD_COLS = [
 
 
 # ── Sheet builder ─────────────────────────────────────────────────────────────
-def _build_sheet(ws, assignments, unassigned, title_text, show_overflow=True):
+def _build_sheet(ws, assignments, unassigned, title_text, show_overflow=True, team_info=None):
     ws.sheet_view.showGridLines = False
 
     # Column widths
@@ -171,7 +171,12 @@ def _build_sheet(ws, assignments, unassigned, title_text, show_overflow=True):
 
         # ── TRK section divider row ───────────────────────────────────────────
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
-        section_txt = f"  TRK {trk_num}  —  {team_id}"
+        info       = (team_info or {}).get(team_id, {})
+        shift_str  = info.get('shift', '')
+        ttype      = info.get('team_type', '')
+        type_part  = f"  ·  {ttype}" if ttype else ''
+        shift_part = f"  ·  {shift_str}" if shift_str else ''
+        section_txt = f"  TRK {trk_num}  —  {team_id}{type_part}{shift_part}"
         _w(ws.cell(row, 1), section_txt, bg=SEC_BG, fg=SEC_FG, bold=True, size=9)
         ws.row_dimensions[row].height = 14
         row += 1
@@ -307,6 +312,13 @@ def generate_coord_excel(result: dict,
 
     label = f"{day_label}  {date_label}".strip()
 
+    # ── Build team shift-time lookup for section divider labels ───────────────
+    team_info = {
+        t['team_id']: {'shift': t.get('shift', ''), 'team_type': t.get('team_type', '')}
+        for t in (result.get('team_summary') or [])
+        if t.get('team_id')
+    }
+
     # ── Split into domestic and international ─────────────────────────────────
     dom_assigns  = []   # domestic + precleared
     intl_assigns = []   # true international only
@@ -338,6 +350,7 @@ def generate_coord_excel(result: dict,
         dom_unassigned,
         title_text=f'American Airlines Catering  ·  COORD  ·  {label}',
         show_overflow=True,
+        team_info=team_info,
     )
 
     # Sheet 2 — INT'L COORD
@@ -348,6 +361,7 @@ def generate_coord_excel(result: dict,
         intl_unassigned,
         title_text=f"American Airlines Catering  ·  INT'L COORD  ·  {label}",
         show_overflow=False,
+        team_info=team_info,
     )
 
     buf = io.BytesIO()
