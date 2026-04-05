@@ -1370,15 +1370,22 @@ def daily_liveops(schedule_date, shift):
         op_type = data.get('type')   # sick_call | delay | reassign | gate_change
         payload = data.get('payload', {})
 
-        # Load current schedule from Supabase
-        # Try 'combined' first (how Confirm saves it), then the requested shift
+        # Load current schedule from Supabase.
+        # Confirm saves as 'morning' (DB check constraint rejects 'combined').
+        # Try all valid shift keys so we find it regardless of what key was used.
         from schedule_store import load_schedule, update_schedule_result, log_modification
-        rec = load_schedule(schedule_date, 'combined') or load_schedule(schedule_date, shift)
+        rec = None
+        actual_shift = shift
+        for _try_shift in ['morning', 'combined', 'afternoon', shift]:
+            rec = load_schedule(schedule_date, _try_shift)
+            if rec:
+                actual_shift = _try_shift
+                break
         if not rec:
             return jsonify({'error': f'No confirmed schedule found for {schedule_date}. '
                                      'Generate and Confirm a schedule on the Mac first.'}), 404
-        # Use the actual shift from the record
-        shift = rec.get('shift', shift)
+        # Use the actual shift key we found the record under
+        shift = rec.get('shift', actual_shift)
 
         # Apply the live op using existing live_ops engine
         from live_ops import handle_sick_call, handle_delay, apply_delay, handle_reassign, handle_gate_change
