@@ -762,7 +762,36 @@ body.authenticated #login-screen { display: none !important; }
   <div class="logo-dot"></div>
   <span class="logo-name">PHL Catering Scheduler</span>
   <span class="logo-sub">American Airlines · Philadelphia International</span>
-  <span id="schedule-date-badge" style="margin-left:8px;padding:5px 12px;border:1px solid #e8a020;border-radius:999px;background:rgba(232,160,32,0.08);font-size:11px;font-weight:700;color:#e8a020;display:none"></span>
+  <!-- Date switcher — clickable pill that opens a schedule-date dropdown -->
+  <div id="date-switcher-wrap" style="position:relative;margin-left:8px;display:none">
+    <button id="schedule-date-badge"
+      onclick="toggleDateSwitcher(event)"
+      style="padding:5px 12px;border:1px solid #e8a020;border-radius:999px;
+             background:rgba(232,160,32,0.08);font-size:11px;font-weight:700;
+             color:#e8a020;cursor:pointer;font-family:var(--mono,monospace);
+             display:flex;align-items:center;gap:6px;white-space:nowrap;
+             transition:background .15s"
+      onmouseover="this.style.background='rgba(232,160,32,0.18)'"
+      onmouseout="this.style.background='rgba(232,160,32,0.08)'">
+      <span id="date-badge-text">—</span>
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" id="date-badge-caret">
+        <path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <!-- Date dropdown -->
+    <div id="date-switcher-dropdown"
+      style="display:none;position:absolute;top:calc(100% + 6px);left:0;
+             min-width:220px;background:var(--surface,#fff);
+             border:1px solid var(--border,#e2e8f0);border-radius:8px;
+             box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:500;
+             padding:6px 0;font-family:var(--mono,monospace)">
+      <div style="padding:6px 14px 4px;font-size:10px;font-weight:700;
+                  color:var(--muted,#64748b);text-transform:uppercase;letter-spacing:.06em">
+        Switch Schedule Date
+      </div>
+      <div id="date-switcher-list"></div>
+    </div>
+  </div>
   <span id="build-badge" style="margin-left:14px;padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted)">V4.0.0 · Ops Mode</span>
 
   <!-- User menu — hidden until authenticated -->
@@ -4136,10 +4165,19 @@ function renderStats(s) {
   // Update prominent date badge in header
   const schedDate = window._scheduleDate || '';
   const schedDay  = s.day_of_week || window._scheduleDay || '';
+  const dateBadgeText = document.getElementById('date-badge-text');
+  const dateSwitcherWrap = document.getElementById('date-switcher-wrap');
+  if (dateBadgeText && schedDate) {
+    dateBadgeText.textContent = schedDate + (schedDay ? '  ·  ' + schedDay : '');
+  }
+  // Only show the date switcher in ops mode (Render) — Mac uses sidebar picker
+  if (dateSwitcherWrap && schedDate && opsOnly) {
+    dateSwitcherWrap.style.display = 'block';
+  }
+  // Legacy: keep old badge hidden
   const dateBadge = document.getElementById('schedule-date-badge');
-  if (dateBadge && schedDate) {
-    dateBadge.textContent = schedDate + (schedDay ? '  ·  ' + schedDay : '');
-    dateBadge.style.display = 'inline-block';
+  if (dateBadge && dateBadge.tagName === 'SPAN') {
+    dateBadge.style.display = 'none';
   }
 
   // In ops mode: hide quality/balance/feasible stats (not relevant without local solve data)
@@ -5985,6 +6023,113 @@ function doLogin() {
   });
 }
 
+// ── Date Switcher (Ops mode) ───────────────────────────────────────────────
+// Populates on first open, then caches the list.
+var _dateSwitcherDates = [];
+
+function toggleDateSwitcher(e) {
+  if (e) { e.stopPropagation(); }
+  var dd = document.getElementById('date-switcher-dropdown');
+  if (!dd) return;
+  var isOpen = dd.style.display !== 'none';
+  if (isOpen) {
+    dd.style.display = 'none';
+    return;
+  }
+  // Populate list then show
+  _populateDateSwitcher(function() {
+    dd.style.display = 'block';
+  });
+}
+
+function _populateDateSwitcher(cb) {
+  var list = document.getElementById('date-switcher-list');
+  if (!list) { if (cb) cb(); return; }
+
+  var token = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
+  fetch('/api/daily/dates', { headers: {'X-Auth-Token': token} })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      _dateSwitcherDates = data.dates || [];
+      list.innerHTML = '';
+
+      var today    = new Date().toISOString().slice(0,10);
+      var tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
+
+      if (!_dateSwitcherDates.length) {
+        list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">No confirmed schedules found</div>';
+        if (cb) cb();
+        return;
+      }
+
+      _dateSwitcherDates.slice(0, 10).forEach(function(d) {
+        var dDate = d.date || d;
+        var dDay  = (d.day_of_week || '').slice(0, 3);
+        var isActive = (dDate === window._scheduleDate);
+        var relLabel = dDate === today    ? 'Today'    :
+                       dDate === tomorrow ? 'Tomorrow' : '';
+
+        var row = document.createElement('button');
+        row.style.cssText = [
+          'display:flex', 'align-items:center', 'width:100%', 'border:none',
+          'background:' + (isActive ? 'var(--accent,#2563eb)' : 'transparent'),
+          'color:' + (isActive ? '#fff' : 'var(--text,#1e293b)'),
+          'padding:8px 14px', 'font-size:12px', 'font-family:var(--mono,monospace)',
+          'cursor:pointer', 'text-align:left', 'gap:8px', 'transition:background .1s'
+        ].join(';');
+
+        if (!isActive) {
+          row.onmouseover = function(){ this.style.background = 'var(--surface2,#f1f5f9)'; };
+          row.onmouseout  = function(){ this.style.background = 'transparent'; };
+        }
+
+        var dateSpan = document.createElement('span');
+        dateSpan.style.flex = '1';
+        dateSpan.textContent = dDate + (dDay ? '  ' + dDay : '');
+
+        row.appendChild(dateSpan);
+
+        if (relLabel) {
+          var rel = document.createElement('span');
+          rel.style.cssText = 'font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;' +
+            'background:' + (isActive ? 'rgba(255,255,255,.25)' : 'rgba(37,99,235,.1)') + ';' +
+            'color:' + (isActive ? '#fff' : 'var(--accent,#2563eb)') + ';letter-spacing:.04em';
+          rel.textContent = relLabel;
+          row.appendChild(rel);
+        }
+
+        if (isActive) {
+          var check = document.createElement('span');
+          check.textContent = '✓';
+          check.style.cssText = 'font-size:11px;margin-left:4px;opacity:.8';
+          row.appendChild(check);
+        }
+
+        row.onclick = function() {
+          document.getElementById('date-switcher-dropdown').style.display = 'none';
+          if (!isActive) { loadSavedSchedule(dDate, 'combined'); }
+        };
+
+        list.appendChild(row);
+      });
+
+      if (cb) cb();
+    })
+    .catch(function(){
+      if (list) list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">Failed to load dates</div>';
+      if (cb) cb();
+    });
+}
+
+// Close date switcher when clicking outside
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('date-switcher-dropdown');
+  var wrap = document.getElementById('date-switcher-wrap');
+  if (dd && dd.style.display !== 'none' && wrap && !wrap.contains(e.target)) {
+    dd.style.display = 'none';
+  }
+});
+
 // ── Logout ─────────────────────────────────────────────────────────────────
 function doLogout() {
   var token = localStorage.getItem(AUTH_KEY);
@@ -6008,6 +6153,13 @@ function doLogout() {
 
   // Stop any running polls
   stopPolling();
+
+  // Hide date switcher
+  var dsWrap = document.getElementById('date-switcher-wrap');
+  if (dsWrap) dsWrap.style.display = 'none';
+  var dsDd = document.getElementById('date-switcher-dropdown');
+  if (dsDd) dsDd.style.display = 'none';
+  _dateSwitcherDates = [];
 
   // Remove injected UI elements so they don't persist across sessions
   var banner = document.getElementById('ops-only-banner');
