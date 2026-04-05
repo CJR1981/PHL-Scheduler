@@ -721,14 +721,20 @@ def export():
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        session = load_session(session_id) if session_id else None
 
-        session = load_session(session_id)
         if not session:
-            return jsonify({'error': 'Session not found — regenerate schedule first'}), 404
-
-        result     = session['result']
-        change_log = session.get('change_log', [])
-        day        = session.get('day', 'Saturday')
+            # Render path: no in-memory session — schedule_data sent inline by frontend
+            inline = data.get('schedule_data')
+            if not inline:
+                return jsonify({'error': 'Session not found — regenerate schedule first or send schedule_data'}), 404
+            result     = inline
+            change_log = inline.get('_change_log', [])
+            day        = data.get('day_of_week') or inline.get('day_of_week', 'Saturday')
+        else:
+            result     = session['result']
+            change_log = session.get('change_log', [])
+            day        = session.get('day', 'Saturday')
 
         xlsx_bytes = generate_excel(result, change_log)
 
@@ -755,14 +761,20 @@ def export_coord():
     try:
         data       = request.get_json()
         session_id = data.get('session_id')
+        session    = load_session(session_id) if session_id else None
 
-        session = load_session(session_id)
         if not session:
-            return jsonify({'error': 'Session not found — regenerate schedule first'}), 404
-
-        result = session['result']
-        day    = session.get('day', '')
-        date   = session.get('schedule_date', '')
+            # Render path: no in-memory session — schedule_data sent inline by frontend
+            inline = data.get('schedule_data')
+            if not inline:
+                return jsonify({'error': 'Session not found — regenerate schedule first or send schedule_data'}), 404
+            result = inline
+            day    = data.get('day_of_week') or inline.get('day_of_week', '')
+            date   = data.get('schedule_date') or inline.get('schedule_date', '')
+        else:
+            result = session['result']
+            day    = session.get('day', '')
+            date   = session.get('schedule_date', '')
 
         # Convert "2026-03-26" → "26 Mar 2026" for the title bar
         try:
