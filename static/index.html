@@ -2947,12 +2947,55 @@ async function submitDelay() {
     return;
   }
 
-  // Delay time path — two steps
+  // Delay time path
   const newStd = document.getElementById('delay-time').value.trim();
   if (!flight || !newStd) { alert('Enter flight number and new time'); return; }
 
   const btn = document.getElementById('delay-confirm');
+  var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
 
+  // ── Render / ops-only path: single atomic call to daily liveops ───────────
+  // The daily liveops endpoint handles analyze+apply in one shot.
+  // Skip the two-step Mac flow entirely on Render.
+  if (opsOnly || !sessionId) {
+    if (!window._scheduleDate) { alert('No schedule date loaded. Reload the page.'); return; }
+    btn.textContent = 'Applying…'; btn.disabled = true;
+    var _delayToken = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
+    try {
+      const r = await fetch(`/api/daily/${window._scheduleDate}/combined/liveops`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-Auth-Token': _delayToken},
+        body: JSON.stringify({ type: 'delay', payload: { flight, new_std: newStd, apply_auto_fixes: true } })
+      });
+      const applyData = await r.json();
+      res.style.display = 'block';
+      if (applyData.success) {
+        res.className = applyData.manual_intervention_needed?.length ? 'op-result warning' : 'op-result success';
+        let msg = `✓ AA${flight} delayed → ${newStd}`;
+        if (applyData.auto_fixes_applied?.length)
+          msg += ` · Reassigned: ${applyData.auto_fixes_applied.map(f=>`AA${f.flight}→${f.to}`).join(', ')}`;
+        if (applyData.manual_intervention_needed?.length)
+          msg += ` · ⚠ Manual needed: AA${applyData.manual_intervention_needed.join(', AA')}`;
+        res.textContent = msg;
+        setScheduleFromServer(applyData.result);
+        addChangeLogEntry({type:'delay', flight, to: newStd});
+        renderResults(fullScheduleData || applyData.result);
+        populateLiveOpsDropdowns(fullScheduleData || applyData.result);
+        if (document.getElementById('tab-dispatch') && document.getElementById('tab-dispatch').style.display !== 'none') loadDispatchBoard();
+        setTimeout(() => closeModal('delay'), applyData.manual_intervention_needed?.length ? 3500 : 2000);
+      } else {
+        res.className = 'op-result error';
+        res.textContent = `✗ ${applyData.error || 'Delay failed'}`;
+      }
+    } catch(e) {
+      res.style.display='block'; res.className='op-result error'; res.textContent=`✗ ${e.message}`;
+    } finally {
+      btn.textContent = 'Analyse Impact'; btn.disabled = false;
+    }
+    return;
+  }
+
+  // ── Mac / in-memory session path: two-step analyze → decision panel → apply ─
   // Step 1: Analyse (first click)
   if (!_delayAnalyseResult) {
     btn.textContent = 'Analysing…'; btn.disabled = true;
@@ -3344,7 +3387,7 @@ async function exportExcel() {
   try {
     const resp = await fetch('/api/export', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type':'application/json', 'X-Auth-Token': localStorage.getItem(AUTH_KEY)||''},
       body: JSON.stringify(_exportBody)
     });
     if (!resp.ok) {
@@ -3382,7 +3425,7 @@ async function exportCoord() {
   try {
     const resp = await fetch('/api/export/coord', {
       method:  'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-Auth-Token': localStorage.getItem(AUTH_KEY)||''},
       body:    JSON.stringify(_coordBody)
     });
     if (!resp.ok) {
@@ -5952,8 +5995,49 @@ function doLogout() {
     }).catch(function(){});
   }
   localStorage.removeItem(AUTH_KEY);
-  currentUser = null;
-  scheduleData = null; sessionId = null;
+
+  // ── Full state reset ──────────────────────────────────────────────────────
+  currentUser      = null;
+  scheduleData     = null;
+  sessionId        = null;
+  fullScheduleData = null;
+  window._scheduleDate   = new Date().toISOString().slice(0,10);
+  window._scheduleDay    = null;
+  window._scheduleStatus = null;
+  window._serverConfig   = null;
+
+  // Stop any running polls
+  stopPolling();
+
+  // Remove injected UI elements so they don't persist across sessions
+  var banner = document.getElementById('ops-only-banner');
+  if (banner) banner.remove();
+  var svToggle = document.getElementById('supervisor-toggle');
+  if (svToggle) svToggle.remove();
+  var datePicker = document.getElementById('recent-dates');
+  if (datePicker) datePicker.remove();
+
+  // Clear rendered schedule content
+  var mainContent = document.getElementById('results-pane') || document.getElementById('schedule-output');
+  if (mainContent) mainContent.innerHTML = '';
+  var emptyEl = document.getElementById('empty-state');
+  if (emptyEl) { emptyEl.style.display = ''; emptyEl.innerHTML = ''; }
+
+  // Re-show sidebar (was hidden for ops/supervisor mode)
+  var sidebar = document.getElementById('sidebar');
+  if (sidebar) { sidebar.style.display = ''; sidebar.classList.remove('collapsed'); }
+
+  // Reset date input to today
+  var di = document.getElementById('schedule-date-input');
+  if (di) di.value = new Date().toISOString().slice(0,10);
+
+  // Disable op buttons until a schedule is loaded
+  ['btn-sick','btn-delay','btn-gate','btn-move','btn-export','btn-export-coord'].forEach(function(id){
+    var b = document.getElementById(id);
+    if (b) b.disabled = true;
+  });
+  // ─────────────────────────────────────────────────────────────────────────
+
   showLoginScreen();
 }
 
@@ -6336,9 +6420,17 @@ function bootForRole(user) {
       }
     }
 
-    // Load schedule dates for date picker, then load most recent
+    // Load date picker list, then auto-load the most recently confirmed schedule.
+    // This may be today OR tomorrow (or any other date) — always prefer the newest.
     loadScheduleDates();
-    loadSavedSchedule(today, 'combined');
+    var _opsToken = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
+    fetch('/api/daily/dates', { headers: {'X-Auth-Token': _opsToken} })
+      .then(function(r){ return r.json(); })
+      .then(function(dd){
+        var best = (dd.dates && dd.dates.length) ? (dd.dates[0].date || dd.dates[0]) : today;
+        loadSavedSchedule(best, 'combined');
+      })
+      .catch(function(){ loadSavedSchedule(today, 'combined'); });
     return;
   }
 
