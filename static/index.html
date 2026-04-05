@@ -640,31 +640,43 @@
     margin-top:1px; letter-spacing:.02em; }
   .tdc-keycafe.pending .tdc-keycafe-code { font-size:11px; color:var(--muted);
     letter-spacing:.04em; font-weight:400; }
-  .tdc-table { width:100%; border-collapse:collapse; font-size:12px; table-layout:auto; }
-  .tdc-table th { background:var(--surface2); color:var(--muted); padding:6px 10px;
-    text-align:left; font-size:10px; font-weight:700;
+  /* ── COORD-sheet table ──────────────────────────────────────────────── */
+  .tdc-table { width:100%; border-collapse:collapse; font-size:11.5px; table-layout:auto; }
+  .tdc-table thead tr { border-bottom:2px solid #BCC8DF; }
+  .tdc-table th {
+    background:#F0F4FA; color:#374151; padding:5px 8px;
+    text-align:left; font-size:9.5px; font-weight:700;
     letter-spacing:.06em; text-transform:uppercase;
-    border-bottom:1px solid var(--border); white-space:nowrap;
+    border-right:1px solid #D1D9E8; white-space:nowrap;
     font-family:-apple-system,sans-serif; }
-  .tdc-table td { padding:7px 10px; border-bottom:1px solid var(--border2);
-    font-family:var(--mono); font-size:12px; color:var(--text2); white-space:nowrap; }
+  .tdc-table th:last-child { border-right:none; }
+  /* inbound/outbound group separators in header */
+  .tdc-table th.col-sep-left  { border-left:2px solid #BCC8DF !important; }
+  .tdc-table th.col-sep-right { border-right:2px solid #BCC8DF !important; }
+  .tdc-table td {
+    padding:5px 8px; border-bottom:1px solid #E2E8F0;
+    border-right:1px solid #EEF2F7;
+    font-family:var(--mono); font-size:11.5px; color:var(--text2); white-space:nowrap; }
+  .tdc-table td:last-child { border-right:none; }
+  .tdc-table td.col-sep-left  { border-left:2px solid #D1D9E8 !important; }
+  .tdc-table tr:hover td { filter: brightness(0.975); }
   .tdc-table tr:last-child td { border-bottom:none; }
-  .tdc-table tr.main-row:hover td { background:#f8faff; }
-  .tdc-table .stop-num { color:var(--muted); width:28px; }
-  .tdc-table .fn { font-weight:700; color:var(--text); }
-  .tdc-table .col-std { font-weight:700; }
+  /* TURN row arrow connector between inbound and outbound groups */
+  .tdc-table td.col-arrow {
+    color:#BCC8DF; font-size:13px; text-align:center;
+    padding:0 2px; border-right:none; width:16px; }
+  /* row type backgrounds */
+  .tdc-table tr.tdc-row-turn td  { background:#FFF9EC; }
+  .tdc-table tr.tdc-row-ron0 td  { background:#FFFFFF; }
+  .tdc-table tr.tdc-row-ron1 td  { background:#EEF4FB; }
+  .tdc-table tr.tdc-row-intl td  { background:#F5F0FF; }
+  .tdc-table tr.tdc-row-spacer td { background:#F1F5F9; height:3px; padding:0; }
+  /* muted inbound data on RON rows */
+  .tdc-table tr.tdc-row-ron0 td.col-inb,
+  .tdc-table tr.tdc-row-ron1 td.col-inb { color:#CBD5E1; }
   .tdc-table .buf-ok   { color:var(--ok); }
   .tdc-table .buf-warn { color:var(--warn); }
   .tdc-table .buf-tight{ color:var(--danger); font-weight:700; }
-  .tdc-table tr.row-intl td { background:#faf5ff; }
-  .tdc-table tr.row-st td   { background:#fffbeb; }
-  .tdc-table tr.row-ron td  { background:#f0fdf4; }
-  .tdc-table tr.row-turn-detail td { background:#fffbeb; border-bottom:2px solid #fde68a; }
-  .tdc-table tr.row-turn-detail .turn-label { font-family:-apple-system,sans-serif;
-    font-size:10px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.06em; color:#92400e; }
-  .tdc-table tr.row-turn-detail .turn-val { font-family:var(--mono); color:#78350f; font-weight:700; }
-  .tdc-table tr.row-turn-detail .turn-muted { font-family:var(--mono); color:#b45309; }
   .team-gained { animation:gainFlash 3s ease-out forwards; }
   @keyframes gainFlash {
     0%  { background:#dbeafe; }
@@ -762,36 +774,7 @@ body.authenticated #login-screen { display: none !important; }
   <div class="logo-dot"></div>
   <span class="logo-name">PHL Catering Scheduler</span>
   <span class="logo-sub">American Airlines · Philadelphia International</span>
-  <!-- Date switcher — clickable pill that opens a schedule-date dropdown -->
-  <div id="date-switcher-wrap" style="position:relative;margin-left:8px;display:none">
-    <button id="schedule-date-badge"
-      onclick="toggleDateSwitcher(event)"
-      style="padding:5px 12px;border:1px solid #e8a020;border-radius:999px;
-             background:rgba(232,160,32,0.08);font-size:11px;font-weight:700;
-             color:#e8a020;cursor:pointer;font-family:var(--mono,monospace);
-             display:flex;align-items:center;gap:6px;white-space:nowrap;
-             transition:background .15s"
-      onmouseover="this.style.background='rgba(232,160,32,0.18)'"
-      onmouseout="this.style.background='rgba(232,160,32,0.08)'">
-      <span id="date-badge-text">—</span>
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" id="date-badge-caret">
-        <path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-      </svg>
-    </button>
-    <!-- Date dropdown -->
-    <div id="date-switcher-dropdown"
-      style="display:none;position:absolute;top:calc(100% + 6px);left:0;
-             min-width:220px;background:var(--surface,#fff);
-             border:1px solid var(--border,#e2e8f0);border-radius:8px;
-             box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:500;
-             padding:6px 0;font-family:var(--mono,monospace)">
-      <div style="padding:6px 14px 4px;font-size:10px;font-weight:700;
-                  color:var(--muted,#64748b);text-transform:uppercase;letter-spacing:.06em">
-        Switch Schedule Date
-      </div>
-      <div id="date-switcher-list"></div>
-    </div>
-  </div>
+  <span id="schedule-date-badge" style="margin-left:8px;padding:5px 12px;border:1px solid #e8a020;border-radius:999px;background:rgba(232,160,32,0.08);font-size:11px;font-weight:700;color:#e8a020;display:none"></span>
   <span id="build-badge" style="margin-left:14px;padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted)">V4.0.0 · Ops Mode</span>
 
   <!-- User menu — hidden until authenticated -->
@@ -2976,55 +2959,12 @@ async function submitDelay() {
     return;
   }
 
-  // Delay time path
+  // Delay time path — two steps
   const newStd = document.getElementById('delay-time').value.trim();
   if (!flight || !newStd) { alert('Enter flight number and new time'); return; }
 
   const btn = document.getElementById('delay-confirm');
-  var opsOnly = window._serverConfig && window._serverConfig.schedule_generation === false;
 
-  // ── Render / ops-only path: single atomic call to daily liveops ───────────
-  // The daily liveops endpoint handles analyze+apply in one shot.
-  // Skip the two-step Mac flow entirely on Render.
-  if (opsOnly || !sessionId) {
-    if (!window._scheduleDate) { alert('No schedule date loaded. Reload the page.'); return; }
-    btn.textContent = 'Applying…'; btn.disabled = true;
-    var _delayToken = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
-    try {
-      const r = await fetch(`/api/daily/${window._scheduleDate}/combined/liveops`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json','X-Auth-Token': _delayToken},
-        body: JSON.stringify({ type: 'delay', payload: { flight, new_std: newStd, apply_auto_fixes: true } })
-      });
-      const applyData = await r.json();
-      res.style.display = 'block';
-      if (applyData.success) {
-        res.className = applyData.manual_intervention_needed?.length ? 'op-result warning' : 'op-result success';
-        let msg = `✓ AA${flight} delayed → ${newStd}`;
-        if (applyData.auto_fixes_applied?.length)
-          msg += ` · Reassigned: ${applyData.auto_fixes_applied.map(f=>`AA${f.flight}→${f.to}`).join(', ')}`;
-        if (applyData.manual_intervention_needed?.length)
-          msg += ` · ⚠ Manual needed: AA${applyData.manual_intervention_needed.join(', AA')}`;
-        res.textContent = msg;
-        setScheduleFromServer(applyData.result);
-        addChangeLogEntry({type:'delay', flight, to: newStd});
-        renderResults(fullScheduleData || applyData.result);
-        populateLiveOpsDropdowns(fullScheduleData || applyData.result);
-        if (document.getElementById('tab-dispatch') && document.getElementById('tab-dispatch').style.display !== 'none') loadDispatchBoard();
-        setTimeout(() => closeModal('delay'), applyData.manual_intervention_needed?.length ? 3500 : 2000);
-      } else {
-        res.className = 'op-result error';
-        res.textContent = `✗ ${applyData.error || 'Delay failed'}`;
-      }
-    } catch(e) {
-      res.style.display='block'; res.className='op-result error'; res.textContent=`✗ ${e.message}`;
-    } finally {
-      btn.textContent = 'Analyse Impact'; btn.disabled = false;
-    }
-    return;
-  }
-
-  // ── Mac / in-memory session path: two-step analyze → decision panel → apply ─
   // Step 1: Analyse (first click)
   if (!_delayAnalyseResult) {
     btn.textContent = 'Analysing…'; btn.disabled = true;
@@ -3406,18 +3346,15 @@ function addChangeLogEntry(entry) {
 }
 
 async function exportExcel() {
-  if (!sessionId && !fullScheduleData) { alert('No schedule loaded'); return; }
+  if (!sessionId) { alert('Generate a schedule first'); return; }
   const btn = document.getElementById('btn-export');
   const orig = btn.textContent;
   btn.textContent = 'Generating…'; btn.disabled = true;
-  const _exportBody = sessionId
-    ? { session_id: sessionId }
-    : { schedule_data: fullScheduleData, day_of_week: window._scheduleDay, schedule_date: window._scheduleDate };
   try {
     const resp = await fetch('/api/export', {
       method: 'POST',
-      headers: {'Content-Type':'application/json', 'X-Auth-Token': localStorage.getItem(AUTH_KEY)||''},
-      body: JSON.stringify(_exportBody)
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id: sessionId })
     });
     if (!resp.ok) {
       const err = await resp.json();
@@ -3444,18 +3381,15 @@ async function exportExcel() {
 }
 
 async function exportCoord() {
-  if (!sessionId && !fullScheduleData) { alert('No schedule loaded'); return; }
+  if (!sessionId) { alert('Generate a schedule first'); return; }
   const btn  = document.getElementById('btn-export-coord');
   const orig = btn.textContent;
   btn.textContent = 'Building COORD…'; btn.disabled = true;
-  const _coordBody = sessionId
-    ? { session_id: sessionId }
-    : { schedule_data: fullScheduleData, day_of_week: window._scheduleDay, schedule_date: window._scheduleDate };
   try {
     const resp = await fetch('/api/export/coord', {
       method:  'POST',
-      headers: {'Content-Type': 'application/json', 'X-Auth-Token': localStorage.getItem(AUTH_KEY)||''},
-      body:    JSON.stringify(_coordBody)
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ session_id: sessionId })
     });
     if (!resp.ok) {
       const err = await resp.json();
@@ -3615,19 +3549,16 @@ function buildTeamCard(t) {
   // Header colour class
   const hdrCls = ttype==='OVERNIGHT' ? 'ovn' : ttype==='PT' ? 'pt' : '';
 
-  // ── COORD-sheet style rows ─────────────────────────────────────────────
-  // Columns: # | FLIGHT | NOSE | GATE | EQP | INBOUND | TO | STD | TYPE |
-  //          DISPATCH | SVC WINDOW | RUN | BATCH | NOTES | [Edit]
-  // Row colours match the PHL_COORD_sample spreadsheet exactly:
-  //   cream  #FFF9EC — flight has inbound (TURN)
-  //   white  #FFFFFF — RON, odd batch index
-  //   blue   #EEF4FB — RON, even batch index
+  // ── COORD-sheet style rows — split inbound/outbound columns ──────────
+  // Layout: # | FLT | NOSE | GATE | EQP | FROM | IN | → | TO | STD | TYPE | DISPATCH | SVC START→END | RUN | BATCH | NOTES | Edit
+  // FROM/IN are the inbound columns; → is a visual connector; TO/STD are outbound.
+  // Row colours: cream for TURN, white/light-blue alternating by batch for RON,
+  //              light purple for true INTL (non-precleared).
   let rows = '';
   let runNum = 0;
   let batchIdx = -1;
   let lastDispatch = null;
 
-  // Pre-compute run sizes so we can show the size badge on the first stop
   const runSizeMap = {};
   ops.forEach(op => {
     const k = op.dispatch_min != null ? op.dispatch_min : op.dispatch || '';
@@ -3635,77 +3566,101 @@ function buildTeamCard(t) {
   });
 
   ops.forEach((op, idx) => {
-    const dispKey = op.dispatch_min != null ? op.dispatch_min : op.dispatch || '';
+    const dispKey   = op.dispatch_min != null ? op.dispatch_min : op.dispatch || '';
     const isFirstInRun = dispKey !== lastDispatch;
     if (isFirstInRun) { runNum++; batchIdx++; lastDispatch = dispKey; }
 
-    const isTurn = !!op.inbound_flight;
+    const isTurn    = !!op.inbound_flight;
+    const isTrueIntl = op.is_intl && !op.is_precleared;
 
-    // Row background — COORD sheet colour logic
-    const rowBg = isTurn ? '#FFF9EC' : (batchIdx % 2 === 0 ? '#FFFFFF' : '#EEF4FB');
+    // Row CSS class — determines background
+    let rowCls = isTurn ? 'tdc-row-turn' : (isTrueIntl ? 'tdc-row-intl' : (batchIdx % 2 === 0 ? 'tdc-row-ron0' : 'tdc-row-ron1'));
 
-    // Thin spacer between runs (not before first run)
+    // Spacer row between runs
     if (isFirstInRun && idx > 0) {
-      rows += `<tr style="background:#F1F5F9"><td colspan="15" style="height:3px;padding:0;border-bottom:1px solid #D1D9E8"></td></tr>`;
+      rows += `<tr class="tdc-row-spacer"><td colspan="17"></td></tr>`;
     }
 
-    // INBOUND cell — inline, no sub-row
-    const inboundCell = isTurn
-      ? `<span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap">
-           <span style="font-size:9px;font-weight:700;padding:1px 4px;background:#FEF3C7;color:#92400E;border-radius:3px;letter-spacing:.04em;white-space:nowrap">↩ TURN</span>
-           <span style="color:#92400E;font-weight:600;font-family:var(--mono)">${op.inbound_origin||'?'}</span>
-           <span style="color:#9CA3AF;font-size:10px;font-family:var(--mono)">${op.inbound_sta||''}</span>
-         </span>`
-      : `<span style="color:#CBD5E1;font-size:10px">RON</span>`;
+    // ── Inbound group ──────────────────────────────────────────────────
+    // FROM: inbound origin code, styled amber on TURN rows, muted on RON
+    const fromCell = isTurn
+      ? `<span style="font-weight:700;color:#92400E">${op.inbound_origin||'?'}</span>`
+      : `<span style="color:#D1D9E8">—</span>`;
 
-    // TYPE cell
-    const typeHtml = (op.is_intl && !op.is_precleared)
-      ? `<span style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;background:#EDE9FE;color:#5B21B6">INTL</span>`
-      : `<span style="color:#9CA3AF;font-size:10px">DOM</span>`;
+    // IN: inbound STA, shown on TURN rows only
+    const inCell = isTurn
+      ? `<span style="color:#B45309;font-weight:600">${op.inbound_sta||'—'}</span>`
+      : `<span style="color:#D1D9E8">—</span>`;
 
-    // STD cell — strikethrough if delayed
+    // Arrow connector — amber on TURN, invisible on RON
+    const arrowCell = isTurn
+      ? `<span style="color:#D97706;font-size:11px">→</span>`
+      : `<span style="color:#E2E8F0">·</span>`;
+
+    // ── Outbound group ─────────────────────────────────────────────────
+    const toCell  = `<span style="font-weight:700;color:${isTrueIntl?'#5B21B6':isTurn?'#92400E':'var(--text)'}">${op.dest||'—'}</span>`;
     const stdCell = op.delayed
-      ? `<span style="color:#92400e;font-weight:700">${op.std}</span> <span style="font-size:10px;color:var(--muted);text-decoration:line-through">${op.original_std||''}</span>`
-      : `<strong>${op.std||'—'}</strong>`;
+      ? `<span style="color:#92400e;font-weight:700">${op.std}</span><br><span style="font-size:9px;color:var(--muted);text-decoration:line-through">${op.original_std||''}</span>`
+      : `<strong style="font-size:12px">${op.std||'—'}</strong>`;
 
-    // Run size badge — first stop only
+    // ── Type badge ─────────────────────────────────────────────────────
+    const typeBadge = isTrueIntl
+      ? `<span style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;background:#EDE9FE;color:#5B21B6;letter-spacing:.04em">INTL</span>`
+      : op.is_precleared
+        ? `<span style="font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;background:#D1FAE5;color:#065F46;letter-spacing:.04em">PRECLRD</span>`
+        : `<span style="font-size:9px;color:#CBD5E1;letter-spacing:.02em">DOM</span>`;
+
+    // ── Dispatch — first stop of run only ──────────────────────────────
+    const dispCell = isFirstInRun
+      ? `<span style="font-weight:600">${op.dispatch||'—'}</span>`
+      : `<span style="color:#E2E8F0">↓</span>`;
+
+    // ── Service window ─────────────────────────────────────────────────
+    const svcCell = `<span style="color:#374151">${op.svc_start||'—'}</span><span style="color:#CBD5E1;margin:0 3px">→</span><span style="color:#374151">${op.svc_end||'—'}</span>`;
+
+    // ── Run size badge — first stop only ───────────────────────────────
     const runSize = runSizeMap[dispKey] || 1;
-    const runSizeHtml = isFirstInRun
+    const runBadge = isFirstInRun
       ? (runSize > 1
-          ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#DBEAFE;color:#1D4ED8;font-size:9px;font-weight:800">${runSize}</span>`
+          ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#DBEAFE;color:#1D4ED8;font-size:9px;font-weight:800">${runSize}</span>`
           : `<span style="color:#D1D5DB;font-size:10px">1</span>`)
-      : `<span style="color:#E2E8F0;font-size:10px">↓</span>`;
+      : `<span style="color:#E5E7EB;font-size:10px">↓</span>`;
 
-    // NOTES badges
+    // ── Notes badges ───────────────────────────────────────────────────
     const noteParts = [];
-    if (op.is_ron)        noteParts.push(['RON',        '#DBEAFE','#1D4ED8',600]);
-    if (op.is_wb)         noteParts.push(['WIDEBODY',   '#E9D5FF','#6B21A8',600]);
-    if (op.is_precleared) noteParts.push(['PRECLEARED', '#D1FAE5','#065F46',600]);
-    if (op.is_tight_turn) noteParts.push(['TIGHT TURN', '#FEE2E2','#7F1D1D',800]);
+    if (op.is_ron)           noteParts.push(['RON',        '#DBEAFE','#1D4ED8',600]);
+    if (op.is_wb)            noteParts.push(['WB',         '#E9D5FF','#6B21A8',700]);
+    if (op.is_precleared)    noteParts.push(['PRECLRD',    '#D1FAE5','#065F46',600]);
+    if (op.is_tight_turn)    noteParts.push(['TIGHT TURN', '#FEE2E2','#7F1D1D',800]);
     else if (op.is_short_turn) noteParts.push(['SHORT TURN','#FEE2E2','#991B1B',600]);
-    if (op.delayed)       noteParts.push([`+${op.delay_mins||'?'}m`,'#FEF3C7','#92400E',700]);
-    if (op.auto_reassigned) noteParts.push(['REASGN',   '#F3F4F6','#374151',600]);
-    if (op.rescued)       noteParts.push(['RESCUED',    '#ECFDF5','#065F46',600]);
+    if (op.delayed)          noteParts.push([`+${op.delay_mins||'?'}m`,'#FEF3C7','#92400E',700]);
+    if (op.auto_reassigned)  noteParts.push(['REASGN',    '#F3F4F6','#374151',600]);
+    if (op.rescued)          noteParts.push(['RESCUED',   '#ECFDF5','#065F46',600]);
     const notesHtml = noteParts.map(([lbl,bg,cl,fw]) =>
       `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:${fw};letter-spacing:.02em;background:${bg};color:${cl};margin-right:2px;white-space:nowrap">${lbl}</span>`
     ).join('');
 
-    rows += `<tr data-flight="${op.flight}" data-dest="${op.dest||''}" style="background:${rowBg}">
-      <td style="text-align:center;width:28px;font-size:11px;font-weight:${isFirstInRun?700:400};color:${isFirstInRun?'#1D4ED8':'#9CA3AF'}">${runNum}</td>
-      <td style="font-weight:700;color:${isTurn?'#92400E':'var(--accent)'};font-family:var(--mono)">${op.flight}</td>
-      <td style="color:#6B7280;font-family:var(--mono);font-size:11px">${op.nose||'—'}</td>
-      <td style="font-weight:800;font-size:13px;letter-spacing:.02em">${op.gate||'—'}</td>
+    // ── Flight number — amber on TURN, accent on RON ───────────────────
+    const fltColor = isTurn ? '#B45309' : (isTrueIntl ? '#5B21B6' : 'var(--accent)');
+
+    rows += `<tr class="${rowCls}" data-flight="${op.flight}" data-dest="${op.dest||''}">
+      <td style="text-align:center;width:26px;color:${isFirstInRun?'#1D4ED8':'#CBD5E1'};font-weight:${isFirstInRun?700:400}">${runNum}</td>
+      <td style="font-weight:700;color:${fltColor}">${op.flight}</td>
+      <td style="color:#9CA3AF;font-size:11px">${op.nose||'—'}</td>
+      <td style="font-weight:800;font-size:12px;letter-spacing:.03em;color:var(--text)">${op.gate||'—'}</td>
       <td style="color:#6B7280;font-size:11px">${op.equip||'—'}</td>
-      <td>${inboundCell}</td>
-      <td style="font-weight:700">${op.dest||'—'}</td>
-      <td style="font-family:var(--mono)">${stdCell}</td>
-      <td>${typeHtml}</td>
-      <td style="font-family:var(--mono);color:${isFirstInRun?'#111827':'#CBD5E1'};font-weight:${isFirstInRun?600:400}">${isFirstInRun?(op.dispatch||'—'):''}</td>
-      <td style="font-family:var(--mono)">${op.svc_start||'—'} <span style="color:#9CA3AF">→</span> ${op.svc_end||'—'}</td>
-      <td style="text-align:center;width:32px">${runSizeHtml}</td>
-      <td style="text-align:center;color:#9CA3AF;font-size:10px;width:36px">${isFirstInRun?runNum:''}</td>
-      <td>${notesHtml}</td>
-      <td style="text-align:right;padding-right:10px;white-space:nowrap"><button class="run-stop-remove" onclick="openRunEditor('${t.team_id}','${op.flight}',event)" style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 8px">Edit</button></td>
+      <td class="col-inb col-sep-left" style="min-width:36px">${fromCell}</td>
+      <td class="col-inb" style="min-width:42px">${inCell}</td>
+      <td class="col-arrow">${arrowCell}</td>
+      <td style="min-width:36px">${toCell}</td>
+      <td style="min-width:46px">${stdCell}</td>
+      <td style="min-width:50px">${typeBadge}</td>
+      <td class="col-sep-left" style="min-width:52px;color:${isFirstInRun?'#111827':'#CBD5E1'};font-weight:${isFirstInRun?600:400}">${isFirstInRun?(op.dispatch||'—'):''}</td>
+      <td style="min-width:116px">${svcCell}</td>
+      <td style="text-align:center;width:28px">${runBadge}</td>
+      <td style="text-align:center;width:34px;color:#9CA3AF;font-size:10px">${isFirstInRun?runNum:''}</td>
+      <td style="min-width:100px">${notesHtml}</td>
+      <td style="text-align:right;padding-right:8px;white-space:nowrap"><button class="run-stop-remove" onclick="openRunEditor('${t.team_id}','${op.flight}',event)" style="border-color:var(--accent);color:var(--accent);font-size:10px;padding:2px 8px;border-radius:4px">Edit</button></td>
     </tr>`;
   });
 
@@ -3736,21 +3691,28 @@ function buildTeamCard(t) {
     </div>
     <table class="tdc-table">
       <thead><tr>
-        <th style="width:28px">#</th>
+        <th style="width:26px">#</th>
         <th>FLIGHT</th>
         <th>NOSE</th>
         <th>GATE</th>
         <th>EQP</th>
-        <th>INBOUND</th>
-        <th>TO</th>
+        <th class="col-sep-left col-sep-right" colspan="3" style="text-align:center;color:#92400E;background:#FFF9EC;letter-spacing:.08em">← INBOUND ·· OUTBOUND →</th>
         <th>STD</th>
         <th>TYPE</th>
-        <th>DISPATCH</th>
-        <th>SERVICE WINDOW</th>
-        <th style="width:32px;text-align:center">RUN</th>
-        <th style="width:36px;text-align:center">BATCH</th>
+        <th class="col-sep-left">DISPATCH</th>
+        <th>SVC START → END</th>
+        <th style="text-align:center">RUN</th>
+        <th style="text-align:center">BATCH</th>
         <th>NOTES</th>
         <th></th>
+      </tr>
+      <tr>
+        <th></th><th></th><th></th><th></th><th></th>
+        <th class="col-sep-left" style="font-size:9px;color:#92400E;background:#FFF9EC;padding-bottom:5px">FROM</th>
+        <th style="font-size:9px;color:#92400E;background:#FFF9EC;padding-bottom:5px">IN</th>
+        <th style="background:#FFF9EC;padding-bottom:5px"></th>
+        <th style="font-size:9px;color:#374151;padding-bottom:5px">TO</th>
+        <th></th><th></th><th class="col-sep-left"></th><th></th><th></th><th></th><th></th><th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4165,19 +4127,10 @@ function renderStats(s) {
   // Update prominent date badge in header
   const schedDate = window._scheduleDate || '';
   const schedDay  = s.day_of_week || window._scheduleDay || '';
-  const dateBadgeText = document.getElementById('date-badge-text');
-  const dateSwitcherWrap = document.getElementById('date-switcher-wrap');
-  if (dateBadgeText && schedDate) {
-    dateBadgeText.textContent = schedDate + (schedDay ? '  ·  ' + schedDay : '');
-  }
-  // Only show the date switcher in ops mode (Render) — Mac uses sidebar picker
-  if (dateSwitcherWrap && schedDate && opsOnly) {
-    dateSwitcherWrap.style.display = 'block';
-  }
-  // Legacy: keep old badge hidden
   const dateBadge = document.getElementById('schedule-date-badge');
-  if (dateBadge && dateBadge.tagName === 'SPAN') {
-    dateBadge.style.display = 'none';
+  if (dateBadge && schedDate) {
+    dateBadge.textContent = schedDate + (schedDay ? '  ·  ' + schedDay : '');
+    dateBadge.style.display = 'inline-block';
   }
 
   // In ops mode: hide quality/balance/feasible stats (not relevant without local solve data)
@@ -4529,10 +4482,8 @@ async function sendAgentMessage() {
   const input = document.getElementById('agent-input');
   const msg = input ? input.value.trim() : '';
   if (!msg) return;
-  // On Render: synthesise a session_id from the loaded schedule date
-  const _agentSid = sessionId || (window._scheduleDate ? `${window._scheduleDate}_combined` : null);
-  if (!_agentSid || !fullScheduleData) {
-    _addBubble('No schedule loaded — open a schedule date first, then I can help.', 'agent');
+  if (!sessionId) {
+    _addBubble('Please generate a schedule first — then I can help.', 'agent');
     if (!agentOpen) toggleAgent();
     return;
   }
@@ -4550,7 +4501,7 @@ async function sendAgentMessage() {
     const resp = await fetch('/api/agent', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ session_id: _agentSid, message: msg, schedule_data: sessionId ? null : fullScheduleData })
+      body: JSON.stringify({ session_id: sessionId, message: msg })
     });
     const data = await resp.json();
     _removeTyping();
@@ -4601,11 +4552,10 @@ async function sendAgentMessage() {
 }
 
 async function resetAgentHistory() {
-  const _resetSid = sessionId || (window._scheduleDate ? `${window._scheduleDate}_combined` : null);
-  if (!_resetSid) return;
+  if (!sessionId) return;
   await fetch('/api/agent/reset', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({session_id: _resetSid})
+    body: JSON.stringify({session_id: sessionId})
   });
   const c = document.getElementById('agent-messages');
   if (c) c.innerHTML = '<div style="align-self:flex-start;max-width:92%;padding:10px 13px;border-radius:12px;border-bottom-left-radius:4px;background:var(--surface2);border:1px solid var(--border);font-size:13px;color:var(--text)">Conversation cleared.</div>';
@@ -6023,113 +5973,6 @@ function doLogin() {
   });
 }
 
-// ── Date Switcher (Ops mode) ───────────────────────────────────────────────
-// Populates on first open, then caches the list.
-var _dateSwitcherDates = [];
-
-function toggleDateSwitcher(e) {
-  if (e) { e.stopPropagation(); }
-  var dd = document.getElementById('date-switcher-dropdown');
-  if (!dd) return;
-  var isOpen = dd.style.display !== 'none';
-  if (isOpen) {
-    dd.style.display = 'none';
-    return;
-  }
-  // Populate list then show
-  _populateDateSwitcher(function() {
-    dd.style.display = 'block';
-  });
-}
-
-function _populateDateSwitcher(cb) {
-  var list = document.getElementById('date-switcher-list');
-  if (!list) { if (cb) cb(); return; }
-
-  var token = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
-  fetch('/api/daily/dates', { headers: {'X-Auth-Token': token} })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      _dateSwitcherDates = data.dates || [];
-      list.innerHTML = '';
-
-      var today    = new Date().toISOString().slice(0,10);
-      var tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
-
-      if (!_dateSwitcherDates.length) {
-        list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">No confirmed schedules found</div>';
-        if (cb) cb();
-        return;
-      }
-
-      _dateSwitcherDates.slice(0, 10).forEach(function(d) {
-        var dDate = d.date || d;
-        var dDay  = (d.day_of_week || '').slice(0, 3);
-        var isActive = (dDate === window._scheduleDate);
-        var relLabel = dDate === today    ? 'Today'    :
-                       dDate === tomorrow ? 'Tomorrow' : '';
-
-        var row = document.createElement('button');
-        row.style.cssText = [
-          'display:flex', 'align-items:center', 'width:100%', 'border:none',
-          'background:' + (isActive ? 'var(--accent,#2563eb)' : 'transparent'),
-          'color:' + (isActive ? '#fff' : 'var(--text,#1e293b)'),
-          'padding:8px 14px', 'font-size:12px', 'font-family:var(--mono,monospace)',
-          'cursor:pointer', 'text-align:left', 'gap:8px', 'transition:background .1s'
-        ].join(';');
-
-        if (!isActive) {
-          row.onmouseover = function(){ this.style.background = 'var(--surface2,#f1f5f9)'; };
-          row.onmouseout  = function(){ this.style.background = 'transparent'; };
-        }
-
-        var dateSpan = document.createElement('span');
-        dateSpan.style.flex = '1';
-        dateSpan.textContent = dDate + (dDay ? '  ' + dDay : '');
-
-        row.appendChild(dateSpan);
-
-        if (relLabel) {
-          var rel = document.createElement('span');
-          rel.style.cssText = 'font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;' +
-            'background:' + (isActive ? 'rgba(255,255,255,.25)' : 'rgba(37,99,235,.1)') + ';' +
-            'color:' + (isActive ? '#fff' : 'var(--accent,#2563eb)') + ';letter-spacing:.04em';
-          rel.textContent = relLabel;
-          row.appendChild(rel);
-        }
-
-        if (isActive) {
-          var check = document.createElement('span');
-          check.textContent = '✓';
-          check.style.cssText = 'font-size:11px;margin-left:4px;opacity:.8';
-          row.appendChild(check);
-        }
-
-        row.onclick = function() {
-          document.getElementById('date-switcher-dropdown').style.display = 'none';
-          if (!isActive) { loadSavedSchedule(dDate, 'combined'); }
-        };
-
-        list.appendChild(row);
-      });
-
-      if (cb) cb();
-    })
-    .catch(function(){
-      if (list) list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">Failed to load dates</div>';
-      if (cb) cb();
-    });
-}
-
-// Close date switcher when clicking outside
-document.addEventListener('click', function(e) {
-  var dd = document.getElementById('date-switcher-dropdown');
-  var wrap = document.getElementById('date-switcher-wrap');
-  if (dd && dd.style.display !== 'none' && wrap && !wrap.contains(e.target)) {
-    dd.style.display = 'none';
-  }
-});
-
 // ── Logout ─────────────────────────────────────────────────────────────────
 function doLogout() {
   var token = localStorage.getItem(AUTH_KEY);
@@ -6140,56 +5983,8 @@ function doLogout() {
     }).catch(function(){});
   }
   localStorage.removeItem(AUTH_KEY);
-
-  // ── Full state reset ──────────────────────────────────────────────────────
-  currentUser      = null;
-  scheduleData     = null;
-  sessionId        = null;
-  fullScheduleData = null;
-  window._scheduleDate   = new Date().toISOString().slice(0,10);
-  window._scheduleDay    = null;
-  window._scheduleStatus = null;
-  window._serverConfig   = null;
-
-  // Stop any running polls
-  stopPolling();
-
-  // Hide date switcher
-  var dsWrap = document.getElementById('date-switcher-wrap');
-  if (dsWrap) dsWrap.style.display = 'none';
-  var dsDd = document.getElementById('date-switcher-dropdown');
-  if (dsDd) dsDd.style.display = 'none';
-  _dateSwitcherDates = [];
-
-  // Remove injected UI elements so they don't persist across sessions
-  var banner = document.getElementById('ops-only-banner');
-  if (banner) banner.remove();
-  var svToggle = document.getElementById('supervisor-toggle');
-  if (svToggle) svToggle.remove();
-  var datePicker = document.getElementById('recent-dates');
-  if (datePicker) datePicker.remove();
-
-  // Clear rendered schedule content
-  var mainContent = document.getElementById('results-pane') || document.getElementById('schedule-output');
-  if (mainContent) mainContent.innerHTML = '';
-  var emptyEl = document.getElementById('empty-state');
-  if (emptyEl) { emptyEl.style.display = ''; emptyEl.innerHTML = ''; }
-
-  // Re-show sidebar (was hidden for ops/supervisor mode)
-  var sidebar = document.getElementById('sidebar');
-  if (sidebar) { sidebar.style.display = ''; sidebar.classList.remove('collapsed'); }
-
-  // Reset date input to today
-  var di = document.getElementById('schedule-date-input');
-  if (di) di.value = new Date().toISOString().slice(0,10);
-
-  // Disable op buttons until a schedule is loaded
-  ['btn-sick','btn-delay','btn-gate','btn-move','btn-export','btn-export-coord'].forEach(function(id){
-    var b = document.getElementById(id);
-    if (b) b.disabled = true;
-  });
-  // ─────────────────────────────────────────────────────────────────────────
-
+  currentUser = null;
+  scheduleData = null; sessionId = null;
   showLoginScreen();
 }
 
@@ -6572,17 +6367,9 @@ function bootForRole(user) {
       }
     }
 
-    // Load date picker list, then auto-load the most recently confirmed schedule.
-    // This may be today OR tomorrow (or any other date) — always prefer the newest.
+    // Load schedule dates for date picker, then load most recent
     loadScheduleDates();
-    var _opsToken = localStorage.getItem('phl_auth_token') || localStorage.getItem(AUTH_KEY) || '';
-    fetch('/api/daily/dates', { headers: {'X-Auth-Token': _opsToken} })
-      .then(function(r){ return r.json(); })
-      .then(function(dd){
-        var best = (dd.dates && dd.dates.length) ? (dd.dates[0].date || dd.dates[0]) : today;
-        loadSavedSchedule(best, 'combined');
-      })
-      .catch(function(){ loadSavedSchedule(today, 'combined'); });
+    loadSavedSchedule(today, 'combined');
     return;
   }
 
