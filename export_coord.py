@@ -290,83 +290,7 @@ def _build_sheet(ws, assignments, unassigned, title_text, show_overflow=True, te
     ws.freeze_panes = ws.cell(3, 1)
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
-def generate_coord_excel(result: dict,
-                         day_label: str = '',
-                         date_label: str = '') -> bytes:
-    """
-    Generate the COORD + INT'L COORD Excel workbook.
 
-    Parameters
-    ----------
-    result     : scheduler result dict (assignments + unassigned)
-    day_label  : e.g. "Thursday"
-    date_label : e.g. "26 Mar 2026"
-
-    Returns
-    -------
-    bytes  — raw xlsx bytes, ready to return from a Flask Response.
-    """
-    assignments = result.get('assignments', []) or []
-    unassigned  = result.get('unassigned',  []) or []
-
-    label = f"{day_label}  {date_label}".strip()
-
-    # ── Build team shift-time lookup for section divider labels ───────────────
-    team_info = {
-        t['team_id']: {'shift': t.get('shift', ''), 'team_type': t.get('team_type', '')}
-        for t in (result.get('team_summary') or [])
-        if t.get('team_id')
-    }
-
-    # ── Split into domestic and international ─────────────────────────────────
-    dom_assigns  = []   # domestic + precleared
-    intl_assigns = []   # true international only
-
-    for a in assignments:
-        dest  = (a.get('dest') or '').upper()
-        is_pc = a.get('is_precleared', False) or dest in PRECLEARED
-        is_i  = a.get('is_intl', False)
-        if is_i and not is_pc:
-            intl_assigns.append(a)
-        else:
-            dom_assigns.append(a)
-
-    dom_unassigned  = [u for u in unassigned
-                       if not (u.get('is_intl') and not u.get('is_precleared', False)
-                               and (u.get('dest') or '').upper() not in PRECLEARED)]
-    intl_unassigned = [u for u in unassigned
-                       if u.get('is_intl') and not u.get('is_precleared', False)
-                       and (u.get('dest') or '').upper() not in PRECLEARED]
-
-    wb = Workbook()
-    wb.remove(wb.active)
-
-    # Sheet 1 — COORD (domestic)
-    ws_coord = wb.create_sheet('COORD')
-    _build_sheet(
-        ws_coord,
-        dom_assigns,
-        dom_unassigned,
-        title_text=f'American Airlines Catering  ·  COORD  ·  {label}',
-        show_overflow=True,
-        team_info=team_info,
-    )
-
-    # Sheet 2 — INT'L COORD
-    ws_intl = wb.create_sheet("INT'L COORD")
-    _build_sheet(
-        ws_intl,
-        intl_assigns,
-        intl_unassigned,
-        title_text=f"American Airlines Catering  ·  INT'L COORD  ·  {label}",
-        show_overflow=False,
-        team_info=team_info,
-    )
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
 
 
 # ── Health Check tab ──────────────────────────────────────────────────────────
@@ -467,6 +391,13 @@ def generate_coord_excel(result: dict,
 
     label = f"{day_label}  {date_label}".strip()
 
+    # ── Build team shift-time lookup for section divider labels ───────────────
+    team_info = {
+        t['team_id']: {'shift': t.get('shift', ''), 'team_type': t.get('team_type', '')}
+        for t in (result.get('team_summary') or [])
+        if t.get('team_id')
+    }
+
     # ── Split domestic vs international ──────────────────────────────────────
     dom_assigns  = []
     intl_assigns = []
@@ -492,12 +423,14 @@ def generate_coord_excel(result: dict,
     ws_coord = wb.create_sheet('COORD')
     _build_sheet(ws_coord, dom_assigns, dom_unassigned,
                  title_text=f'American Airlines Catering  ·  COORD  ·  {label}',
-                 show_overflow=True)
+                 show_overflow=True,
+                 team_info=team_info)
 
     ws_intl = wb.create_sheet("INT'L COORD")
     _build_sheet(ws_intl, intl_assigns, intl_unassigned,
                  title_text=f"American Airlines Catering  ·  INT'L COORD  ·  {label}",
-                 show_overflow=False)
+                 show_overflow=False,
+                 team_info=team_info)
 
     # ── Health Check tab ─────────────────────────────────────────────────────
     try:
